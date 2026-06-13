@@ -1,3 +1,5 @@
 results/
+json_files/
+stl_uploads/
 __pycache__/
 *.log

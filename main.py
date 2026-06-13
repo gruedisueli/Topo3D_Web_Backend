@@ -16,9 +16,10 @@ from pathlib import Path
 import logging
 from logging.handlers import RotatingFileHandler
 from pydantic import ValidationError
-from schemas import OptimizationParams, Geometry
+from schemas import OptimizationParams, Force
 from typing import List
 import json
+import shutil
 
 # Define the origins you want to allow (e.g., your frontend URL)
 ALLOWED_WEBSOCKET_ORIGINS = [
@@ -36,10 +37,13 @@ MAX_UPLOADS = 50 #max saved uploads per ip address
 MAX_UPLOAD_SIZE = 10_000_000
 UPLOAD_DIR = "stl_uploads"
 JSON_DIR = "json_files"
+RESULTS_DIR = "results"
 CLEANUP_INTERVAL_SECONDS = 3600 #1 hour
 FILE_AGE_LIMIT_SECONDS = 24 * 3600
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(JSON_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 #configure logging
 log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -69,21 +73,44 @@ app.add_middleware(
 )
 
 def cleanup_old_files():
+    cleanup_files(UPLOAD_DIR, "stl")
+    cleanup_files(JSON_DIR, "json")
+    cleanup_results()
+
+def cleanup_files(dir: str, ext: str):
     """Delete files in UPLOAD_DIR that are older than FILE_AGE_LIMIT_SECONDS."""
     now = time.time()
     deleted_count = 0
     total_files = 0
-    for file_path in Path(UPLOAD_DIR).glob("*.stl"):
+    for file_path in Path(dir).glob(f"*.{ext}"):
         total_files += 1
         try:
             #get file modification time
             mtime = file_path.stat().st_mtime
             if now - mtime > FILE_AGE_LIMIT_SECONDS:
-                file_path.unlink()
+                Path(file_path).unlink()
                 deleted_count += 1
         except Exception as e:
             logger.error(f"Error cleanup up {file_path}: {e}")
-    logger.info(f"Cleanup: deleted {deleted_count} old STL files of {total_files} saved STLs")
+    logger.info(f"Cleanup: deleted {deleted_count} old *.{ext} files of {total_files} files")
+
+def cleanup_results():
+    """Delete results directories that are older than FILE_AGE_LIMIT_SECONDS."""
+    now = time.time()
+    deleted_count = 0
+    total_dirs = 0
+    children = list(Path(RESULTS_DIR).iterdir())
+    for child in children:
+        total_dirs += 1
+        try:
+            mtime = child.stat().st_mtime
+            if now - mtime > FILE_AGE_LIMIT_SECONDS:
+                shutil.rmtree(str(child))
+                deleted_count += 1
+        except Exception as e:
+            logger.error(f"Error cleanup up {child}: {e}")
+    logger.info(f"Cleanup: deleted {deleted_count} old result directories of {total_dirs} directories")
+
 
 def run_cleanup_loop():
     """Background thread: runs cleanup periodically."""
@@ -159,18 +186,18 @@ async def optimization_worker():
     """Background task that runs one optimization at a time."""
     while True:
         #wait for the next waiting future
-        future, arg_list, obstacles_path, supports_path, forces_path, callback, stop_event, msg_queue, websocket = await waiting_queue.get()
+        future, arg_list, obstacles_path, supports_path, forces_path, results_path, callback, stop_event, msg_queue, websocket = await waiting_queue.get()
         #notify the client that their optimization is starting
         try:
             await websocket.send_json({"status": "starting"})
         except:
             #client disconnected while waiting
             if obstacles_path is not None:
-                obstacles_path.unlink()
+                Path(obstacles_path).unlink()
             if supports_path is not None:
-                supports_path.unlink()
+                Path(supports_path).unlink()
             if forces_path is not None:
-                forces_path.unlink()
+                Path(forces_path).unlink()
             future.set_result(True)  #allow the next in queue to start
             continue
 
@@ -194,7 +221,13 @@ async def optimization_worker():
                 if typ == "iteration":
                     await websocket.send_bytes(quantize_density_field(data))
                 elif typ == "complete":
-                    await websocket.send_json({"status": "complete"})
+                    if os.path.exists(results_path):
+                        with open(results_path, "rb") as f:
+                            stl_data = f.read()
+                            await websocket.send_json({"status": "complete", "has_stl": True})
+                            await websocket.send_bytes(stl_data)
+                    else:
+                        await websocket.send_json({"status": "complete", "has_stl": False})
                     break
         except Exception as e:
             #client likely disconnected
@@ -207,11 +240,11 @@ async def optimization_worker():
             #cleanup
             thread.join()
             if obstacles_path is not None:
-                obstacles_path.unlink()
+                Path(obstacles_path).unlink()
             if supports_path is not None:
-                supports_path.unlink()
+                Path(supports_path).unlink()
             if forces_path is not None:
-                forces_path.unlink()
+                Path(forces_path).unlink()
             try:
                 if not websocket.client_state == WebSocketState.DISCONNECTED:
                     await websocket.close()
@@ -277,7 +310,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except ValidationError as e:
         m = "Invalid parameters"
         logger.warning(f"{client_ip}:{m}:{e.errors()}")
-        await websocket.send_json({"error": f"{m}: {e.errors()}"})
+        await websocket.send_json({"error": f"{m}"})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     
@@ -303,16 +336,20 @@ async def websocket_endpoint(websocket: WebSocket):
     obstacles_path = None
     supports_path = None
     forces_path = None
+    id = o_p.design_space_stl_id if o_p.design_space_stl_id is not None else str(uuid.uuid4())
+    arg_list.append("--experiment-name")
+    arg_list.append(id)
+    results_path = os.path.join(RESULTS_DIR, id, "optimized_design.stl")
     if o_p.obstacles is not None:
-        obstacles_path = save_geometry_json("obstacles", str(o_p.design_space_stl_id), o_p.obstacles)
+        obstacles_path = save_mask_json("obstacles", id, o_p.obstacles)
         arg_list.append("--obstacle-config")
         arg_list.append(obstacles_path)
     if o_p.supports is not None:
-        supports_path = save_geometry_json("supports", str(o_p.design_space_stl_id), o_p.supports)
+        supports_path = save_mask_json("supports", id, o_p.supports)
         arg_list.append("--support-config")
         arg_list.append(supports_path)
     if o_p.forces is not None:
-        forces_path = save_geometry_json("forces", str(o_p.design_space_stl_id), o_p.forces)
+        forces_path = save_force_json("forces", id, o_p.forces)
         arg_list.append("--force-config")
         arg_list.append(forces_path)
 
@@ -327,7 +364,7 @@ async def websocket_endpoint(websocket: WebSocket):
     future = asyncio.Future()
 
     #add to the queue along with all necessary data
-    await waiting_queue.put((future, arg_list, obstacles_path, supports_path, forces_path, callback, stop_event, msg_queue, websocket))
+    await waiting_queue.put((future, arg_list, obstacles_path, supports_path, forces_path, results_path, callback, stop_event, msg_queue, websocket))
 
     #send position in queue to client
     queue_position = waiting_queue.qsize() - 1
@@ -377,8 +414,15 @@ async def websocket_endpoint(websocket: WebSocket):
             pass
         pass
 
-def save_geometry_json(name:str, id:str, data:List[Geometry]) -> str:
-    data_entries = {"geometry": [item.dict() for item in data]}
+def save_mask_json(name:str, id:str, data:List[int]) -> str:
+    data_entries = {"mask": data}
+    path = os.path.join(JSON_DIR, f"{id}_{name}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data_entries, f, indent=2)
+    return path
+
+def save_force_json(name:str, id:str, data:List[Force]) -> str:
+    data_entries = {"forces": [item.dict() for item in data]}
     path = os.path.join(JSON_DIR, f"{id}_{name}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data_entries, f, indent=2)
