@@ -30,18 +30,19 @@ ALLOWED_WEBSOCKET_ORIGINS = [
 
 connection_attempts = defaultdict(list)#dictionary of IP addresses with a list of timestamps for connection time
 command_timestamps = defaultdict(lambda: deque(maxLen=10)) #only store last 10 timestamps
-http_timestamps = defaultdict(lambda: deque(maxLen=10)) #only store last 10 timestamps
+#http_timestamps = defaultdict(lambda: deque(maxLen=10)) #only store last 10 timestamps
 uploads = defaultdict(list) #uploads by ip address
 
 MAX_UPLOADS = 50 #max saved uploads per ip address
 MAX_UPLOAD_SIZE = 10_000_000
-UPLOAD_DIR = "stl_uploads"
+#UPLOAD_DIR = "stl_uploads"
 JSON_DIR = "json_files"
 RESULTS_DIR = "results"
 CLEANUP_INTERVAL_SECONDS = 3600 #1 hour
 FILE_AGE_LIMIT_SECONDS = 24 * 3600
+MAX_VOXEL_CT = 64 * 64 * 64
 
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+#os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(JSON_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -73,12 +74,12 @@ app.add_middleware(
 )
 
 def cleanup_old_files():
-    cleanup_files(UPLOAD_DIR, "stl")
+    #cleanup_files(UPLOAD_DIR, "stl")
     cleanup_files(JSON_DIR, "json")
     cleanup_results()
 
 def cleanup_files(dir: str, ext: str):
-    """Delete files in UPLOAD_DIR that are older than FILE_AGE_LIMIT_SECONDS."""
+    """Delete files in DIR that are older than FILE_AGE_LIMIT_SECONDS."""
     now = time.time()
     deleted_count = 0
     total_files = 0
@@ -128,55 +129,55 @@ def can_connect(ip: str, max_attempts: int = 5, window_seconds: int= 60) -> bool
     connection_attempts[ip] = attempts
     return True
 
-@app.post("/upload-stl")
-async def upload_stl(request: Request, file: UploadFile = File(...)):
-    #check last upload time and deny if too recent
-    now = time.time()
-    client_ip = request.client.host
-    upload_history = http_timestamps[client_ip]
-    if upload_history and now - upload_history[-1] < 10: #only allow one upload every 10 seconds
-        m = "Too many requests. Try again later"
-        logger.warning(f"{client_ip}: {m}")
-        raise HTTPException(400, m)
-    upload_history.append(now)
+# @app.post("/upload-stl")
+# async def upload_stl(request: Request, file: UploadFile = File(...)):
+#     #check last upload time and deny if too recent
+#     now = time.time()
+#     client_ip = request.client.host
+#     upload_history = http_timestamps[client_ip]
+#     if upload_history and now - upload_history[-1] < 10: #only allow one upload every 10 seconds
+#         m = "Too many requests. Try again later"
+#         logger.warning(f"{client_ip}: {m}")
+#         raise HTTPException(400, m)
+#     upload_history.append(now)
 
-    if not file.filename.endswith('.stl'):
-        m = "Invalid file type. Only .stl files are allowed"
-        logger.warning(f"{client_ip}: {m}")
-        raise HTTPException(400, m)
+#     if not file.filename.endswith('.stl'):
+#         m = "Invalid file type. Only .stl files are allowed"
+#         logger.warning(f"{client_ip}: {m}")
+#         raise HTTPException(400, m)
     
-    #chunked reading of file size (file.size is not a reliable measure as it is a claim by the client)
-    contents = b''
-    while chunk := await file.read(8192):
-        contents += chunk
-        if len(contents) > MAX_UPLOAD_SIZE:
-            m = "File too large (max 10MB size)"
-            logger.warning(f"{client_ip}: {m}")
-            raise HTTPException(status_code=413, detail = m)
+#     #chunked reading of file size (file.size is not a reliable measure as it is a claim by the client)
+#     contents = b''
+#     while chunk := await file.read(8192):
+#         contents += chunk
+#         if len(contents) > MAX_UPLOAD_SIZE:
+#             m = "File too large (max 10MB size)"
+#             logger.warning(f"{client_ip}: {m}")
+#             raise HTTPException(status_code=413, detail = m)
     
-    # #check header of STL (heuristic, optional for now)
-    # if not (contents.startswith(b'solid') or len(contents)> 80):
+#     # #check header of STL (heuristic, optional for now)
+#     # if not (contents.startswith(b'solid') or len(contents)> 80):
 
-    try:
-        #generate unique ID and a secure temporary file path
-        stl_id = str(uuid.uuid4())
-        file_path = os.path.join(UPLOAD_DIR, f"{stl_id}.stl")
+#     try:
+#         #generate unique ID and a secure temporary file path
+#         stl_id = str(uuid.uuid4())
+#         file_path = os.path.join(UPLOAD_DIR, f"{stl_id}.stl")
 
-        #save file
-        with open(file_path, "wb") as buffer:
-            content = await file.read()
-            buffer.write(content)
-            #delete old uploads that exceed the number allowed
-            if len(uploads[client_ip]) >= MAX_UPLOADS:
-                to_del = uploads[client_ip].pop(0)
-                if os.path.exists(to_del):
-                    os.remove(to_del)
-            uploads[client_ip].append(file_path)
-            return JSONResponse(content={"stl_id" : stl_id})
-    except Exception as e:
-        m = "{client_ip}: Could not save file."
-        logger.error(m)
-        raise HTTPException(500, m)
+#         #save file
+#         with open(file_path, "wb") as buffer:
+#             content = await file.read()
+#             buffer.write(content)
+#             #delete old uploads that exceed the number allowed
+#             if len(uploads[client_ip]) >= MAX_UPLOADS:
+#                 to_del = uploads[client_ip].pop(0)
+#                 if os.path.exists(to_del):
+#                     os.remove(to_del)
+#             uploads[client_ip].append(file_path)
+#             return JSONResponse(content={"stl_id" : stl_id})
+#     except Exception as e:
+#         m = "{client_ip}: Could not save file."
+#         logger.error(m)
+#         raise HTTPException(500, m)
     
 #global state
 waiting_queue = asyncio.Queue()
@@ -257,7 +258,6 @@ async def optimization_worker():
 @app.on_event("startup")
 async def startup_event():
     # Ensure upload directory exists
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
     # Run cleanup once immediately
     cleanup_old_files()
     #start cleanup background thread
@@ -309,13 +309,14 @@ async def websocket_endpoint(websocket: WebSocket):
         o_p = OptimizationParams(**raw_msg) #strict type enforcing
     except ValidationError as e:
         m = "Invalid parameters"
-        logger.warning(f"{client_ip}:{m}:{e.errors()}")
+        logger.warning(f"{client_ip}:{m}")
         await websocket.send_json({"error": f"{m}"})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     
     #convert validated input parameters into the list of arguments that pytopo3d expects
     arg_list = ["--gpu", "--no_visualization", "--export-stl", 
+                "--smooth-iterations", "0", #do not use smoothing, scaling issues occur
                 "--nelx", str(o_p.nelx), 
                 "--nely", str(o_p.nely), 
                 "--nelz", str(o_p.nelz), 
@@ -324,19 +325,27 @@ async def websocket_endpoint(websocket: WebSocket):
                 "--rmin", str(o_p.rmin),
                 "--tolx", str(o_p.tolx),
                 "--maxloop", str(o_p.maxloop),
-                "--pitch", str(o_p.pitch)
+                #"--pitch", str(o_p.pitch)
                 ]
     
-    if o_p.invert_design_space:
-        arg_list.append("--invert-design-space")
-    if o_p.design_space_stl_id is not None:
-        arg_list.append("--design-space-stl")
-        stl_path = os.path.join(UPLOAD_DIR, f"{o_p.design_space_stl_id}.stl")
-        arg_list.append(stl_path)
+    voxel_ct = o_p.nelx * o_p.nely * o_p.nelz
+    if voxel_ct > MAX_VOXEL_CT:
+        m = "Invalid parameters"
+        logger.warning(f"{client_ip}:{m}")
+        await websocket.send_json({"error": f"{m}"})
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    
+    # if o_p.invert_design_space:
+    #     arg_list.append("--invert-design-space")
+    # if o_p.design_space_stl_id is not None:
+    #     arg_list.append("--design-space-stl")
+    #     stl_path = os.path.join(UPLOAD_DIR, f"{o_p.design_space_stl_id}.stl")
+    #     arg_list.append(stl_path)
     obstacles_path = None
     supports_path = None
     forces_path = None
-    id = o_p.design_space_stl_id if o_p.design_space_stl_id is not None else str(uuid.uuid4())
+    id = str(uuid.uuid4()) #o_p.design_space_stl_id if o_p.design_space_stl_id is not None else str(uuid.uuid4())
     arg_list.append("--experiment-name")
     arg_list.append(id)
     results_path = os.path.join(RESULTS_DIR, id, "optimized_design.stl")
