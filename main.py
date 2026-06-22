@@ -31,8 +31,6 @@ connection_attempts = defaultdict(list)#dictionary of IP addresses with a list o
 command_timestamps = defaultdict(lambda: deque(maxLen=10)) #only store last 10 timestamps
 uploads = defaultdict(list) #uploads by ip address
 
-MAX_UPLOADS = 50 #max saved uploads per ip address
-MAX_UPLOAD_SIZE = 10_000_000
 JSON_DIR = "json_files"
 RESULTS_DIR = "results"
 CLEANUP_INTERVAL_SECONDS = 3600 #1 hour
