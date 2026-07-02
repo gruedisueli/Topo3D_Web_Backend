@@ -2,6 +2,16 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
+# Install git first (needed to clone the GitHub dependency)
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone the optimizer repo
+RUN git clone --branch dev https://github.com/gruedisueli/PyTopo3D_Backend.git /opt/pytopo3d_backend
+
+# Install the backend with GPU support (this installs all deps from its pyproject.toml)
+RUN pip install --no-cache-dir -e "/opt/pytopo3d_backend[gpu]"
+
 # Copy ONLY requirements file(s)
 COPY requirements.txt .
 

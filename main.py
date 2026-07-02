@@ -1,11 +1,16 @@
+import sys
+import os
+# Add the cloned repo path so run_opt.py can be imported
+BACKEND_PATH = os.environ.get("PYTOPO3D_BACKEND_PATH", "/opt/pytopo3d_backend")
+sys.path.insert(0, BACKEND_PATH)
 from run_opt import run_optimization_api
+
 from fastapi import FastAPI, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
 import threading
 import queue
 import numpy as np
 import asyncio
-import os
 import uuid
 from collections import defaultdict, deque
 import time
