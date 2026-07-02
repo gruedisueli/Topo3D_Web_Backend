@@ -1,5 +1,3 @@
-import sys
-sys.path.insert(0, "../PyTopo3D_callbacks")
 from run_opt import run_optimization_api
 from fastapi import FastAPI, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,16 +17,30 @@ from schemas import OptimizationParams, Force
 from typing import List
 import json
 import shutil
+import subprocess
+
+
+# cloudflare tunneling / verify token is in the environment variables wherever you deploy this
+tunnel_token = os.getenv('TUNNEL_TOKEN')
+
+if tunnel_token is None:
+    print("ERROR: TUNNEL_TOKEN environment variable not set!")
+    exit(1)
+
+print(f"Token loaded successfully. Length: {len(tunnel_token)}")
+
+# The token is already in os.environ, so the child process gets it automatically.
+subprocess.Popen(["cloudflared", "tunnel", "run", "--url", "http://localhost:8000"])
 
 # Define the origins you want to allow (e.g., your frontend URL)
 ALLOWED_WEBSOCKET_ORIGINS = [
     #"http://localhost:5173",   # Your local dev environment
-    "https://gruedisueli.github.io/Topo3D_Web_Frontend/" # Your production GitHub Pages URL
+    "https://gruedisueli.github.io" # Your production GitHub Pages URL
 ]
 
 
 connection_attempts = defaultdict(list)#dictionary of IP addresses with a list of timestamps for connection time
-command_timestamps = defaultdict(lambda: deque(maxLen=10)) #only store last 10 timestamps
+command_timestamps = defaultdict(lambda: deque(maxlen=10)) #only store last 10 timestamps
 uploads = defaultdict(list) #uploads by ip address
 
 JSON_DIR = "json_files"
@@ -59,9 +71,17 @@ logger.addHandler(console_handler)
 
 app = FastAPI()
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "pytopo3d"}
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://gruedisueli.github.io/Topo3D_Web_Frontend/"],  
+    allow_origins=["https://gruedisueli.github.io"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

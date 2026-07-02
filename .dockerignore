@@ -1,0 +1,23 @@
+__pycache__
+**.pyc
+
+# folders
+datasets/
+results/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# OS or Editor related files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Build artifacts
+pytopo3d.egg-info/
+dist/
+build/
+*.egg-info
