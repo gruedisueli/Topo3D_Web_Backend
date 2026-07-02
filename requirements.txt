@@ -12,5 +12,8 @@ numpy>=1.24.0
 # WebSocket support (included with fastapi/uvicorn, but explicit)
 websockets>=11.0
 
+# GPU acceleration (bundles CUDA runtime - no system CUDA needed)
+cupy-cuda12x[ctk]
+
 # Topology optimization backend (dev branch)
 run_optimization_api @ git+https://github.com/gruedisueli/PyTopo3D_Backend.git@dev

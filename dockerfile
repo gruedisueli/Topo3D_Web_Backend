@@ -2,13 +2,14 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
+# Copy ONLY requirements file(s)
+COPY requirements.txt .
+
+# Install dependencies (cached unless requirements.txt changes)
+RUN pip install --no-cache-dir -r requirements.txt
+
 # Copy all source code
 COPY . .
-
-# Install the package with GPU support
-# CuPy[ctk] bundles its own CUDA runtime libraries as wheels,
-# so no system CUDA install is needed — the NVIDIA host driver is sufficient.
-RUN pip install --no-cache-dir -e ".[gpu,web]"
 
 # Copy and set up entrypoint
 COPY entrypoint.sh /entrypoint.sh
