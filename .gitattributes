@@ -1,0 +1,10 @@
+# Ensure shell scripts always use LF line endings
+entrypoint.sh text eol=lf
+*.sh text eol=lf
+
+# Python files - preserve as-is
+*.py text
+
+# Binary files
+*.png binary
+*.stl binary
