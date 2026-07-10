@@ -30,16 +30,17 @@ tunnel_token = os.getenv('TUNNEL_TOKEN')
 
 if tunnel_token is None:
     print("ERROR: TUNNEL_TOKEN environment variable not set!")
-    exit(1)
-
-print(f"Token loaded successfully. Length: {len(tunnel_token)}")
-
-# The token is already in os.environ, so the child process gets it automatically.
-subprocess.Popen(["cloudflared", "tunnel", "run", "--url", "http://localhost:8000"])
+    # Only exit if running inside a Docker container
+    if os.path.exists("/.dockerenv"):
+        exit(1)
+else:
+    print(f"Token loaded successfully. Length: {len(tunnel_token)}")
+    # The token is already in os.environ, so the child process gets it automatically.
+    subprocess.Popen(["cloudflared", "tunnel", "run", "--url", "http://localhost:8000"])
 
 # Define the origins you want to allow (e.g., your frontend URL)
 ALLOWED_WEBSOCKET_ORIGINS = [
-    #"http://localhost:5173",   # Your local dev environment
+    "http://localhost:5173",   # Your local dev environment
     "https://gruedisueli.github.io" # Your production GitHub Pages URL
 ]
 
