@@ -189,7 +189,8 @@ async def optimization_worker():
                     logger.error("Optimization timed out")
                     break
                 if typ == "iteration":
-                    await websocket.send_bytes(quantize_density_field(data))
+                    await websocket.send_json({"status": "change_update", "change": data[0]})
+                    await websocket.send_bytes(quantize_density_field(data[1]))
                 elif typ == "complete":
                     if os.path.exists(results_path):
                         with open(results_path, "rb") as f:
@@ -329,8 +330,8 @@ async def websocket_endpoint(websocket: WebSocket):
     msg_queue = queue.Queue()
     stop_event = threading.Event()
 
-    def callback(density):
-        msg_queue.put(("iteration", density.copy()))
+    def callback(change, density):
+        msg_queue.put(("iteration", (change, density.copy())))
 
     #create a future that will be resolved when this job is done
     future = asyncio.Future()
