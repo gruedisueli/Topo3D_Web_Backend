@@ -232,8 +232,10 @@ if len(runners) == 0:
             exit(1)
         runners[url] = Runner(id)
 
-cloudflared_api_token = os.getenv('CLOUDFLARED_API_TOKEN')
-cloudflared_account_id = os.getenv('CLOUDFLARED_ACCOUNT_ID')
+origin_name = os.getenv('ORIGIN_NAME')
+if origin_name is None:
+    print("Origin name is not set")
+    exit(1)
 
 # Define the origins you want to allow (e.g., your frontend URL, or a middleman)
 allowed_origins = [os.getenv('ALLOWED_WEBSOCKET_ORIGIN')]
@@ -490,7 +492,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     
                     #create a new connection to the backend for each optimization
                     try:
-                        backend_websocket = await websockets.connect(backend_url)
+                        backend_websocket = await websockets.connect(backend_url, origin=origin_name)
                         backend_listener = asyncio.create_task(listen_for_backend_msgs())
                         logger.info(f"Connected to backend at {backend_url}")
                     except Exception as e:
