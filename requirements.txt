@@ -11,3 +11,9 @@ numpy>=1.24.0
 
 # WebSocket support (included with fastapi/uvicorn, but explicit)
 websockets>=11.0
+
+#vastAI
+vastai>=1.3.0
+
+# Async HTTP client
+httpx>=0.25.0

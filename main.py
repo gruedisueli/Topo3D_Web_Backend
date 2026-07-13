@@ -23,6 +23,7 @@ from typing import List
 import json
 import shutil
 import subprocess
+from haship import hash_ip
 
 
 # cloudflare tunneling / verify token is in the environment variables wherever you deploy this
@@ -38,22 +39,21 @@ else:
     # The token is already in os.environ, so the child process gets it automatically.
     subprocess.Popen(["cloudflared", "tunnel", "run", "--url", "http://localhost:8000"])
 
-# Define the origins you want to allow (e.g., your frontend URL)
-ALLOWED_WEBSOCKET_ORIGINS = [
-    "http://localhost:5173",   # Your local dev environment
-    "https://gruedisueli.github.io" # Your production GitHub Pages URL
-]
+# Define the origins you want to allow (e.g., your frontend URL, or a middleman)
+allowed_origins = [os.getenv('ALLOWED_WEBSOCKET_ORIGIN')]
+if allowed_origins[0] is None:
+    print("Error: could not locate the environment variable for allowed websocket origin")
+allowed_origins.append("http://localhost:5173")#for local testing
 
-
-connection_attempts = defaultdict(list)#dictionary of IP addresses with a list of timestamps for connection time
+connection_attempts = defaultdict(list)#dictionary of hashed IP addresses with a list of timestamps for connection time
 command_timestamps = defaultdict(lambda: deque(maxlen=10)) #only store last 10 timestamps
-uploads = defaultdict(list) #uploads by ip address
 
 JSON_DIR = "json_files"
 RESULTS_DIR = "results"
 CLEANUP_INTERVAL_SECONDS = 3600 #1 hour
 FILE_AGE_LIMIT_SECONDS = 24 * 3600
 MAX_VOXEL_CT = 64 * 64 * 64
+MAX_JOB_LENGTH_SECONDS = 6 * 3600 #6 hours
 
 os.makedirs(JSON_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -179,10 +179,15 @@ async def optimization_worker():
         loop = asyncio.get_event_loop()
         thread = threading.Thread(target=run_opt_blocking)
         thread.start()
+        start_time = time.time()
 
         #monitor the msg_queue for updates and send them to the client
         try:
             while True:
+                if time.time() - start_time > MAX_JOB_LENGTH_SECONDS:
+                    #gently force the optimization to complete
+                    stop_event.set()
+                    await websocket.send_json({"status": "stopping"})
                 try:
                     typ, data = await asyncio.wait_for(loop.run_in_executor(None, msg_queue.get), timeout=3600)  #timeout to prevent hanging indefinitely
                 except asyncio.TimeoutError:
@@ -239,13 +244,13 @@ async def startup_event():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):  
     #check connection attempts for this IP address
-    client_ip = websocket.client.host
-    if not can_connect(client_ip):
+    client_ip_hash = hash_ip(websocket.client.host)
+    if not can_connect(client_ip_hash):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
     
     # --- Secure Origin Check ---
     origin = websocket.headers.get("origin")
-    if not origin or origin not in ALLOWED_WEBSOCKET_ORIGINS:
+    if not origin or origin not in allowed_origins:
         logger.warning(f"Rejected WebSocket connection from unauthorized origin: {origin}")
         # Close the connection before accepting it
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -270,7 +275,7 @@ async def websocket_endpoint(websocket: WebSocket):
     #validate and sanitize incoming message
     if len(raw_msg) > 1024:#reject large messages
         m = "message too large"
-        logger.warning(f"{client_ip}:{m}")
+        logger.warning(f"{client_ip_hash}:{m}")
         await websocket.send_json({"error": {m}})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -279,7 +284,7 @@ async def websocket_endpoint(websocket: WebSocket):
         o_p = OptimizationParams(**raw_msg) #strict type enforcing
     except ValidationError as e:
         m = "Invalid parameters"
-        logger.warning(f"{client_ip}:{m}")
+        logger.warning(f"{client_ip_hash}:{m}")
         await websocket.send_json({"error": f"{m}"})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -301,7 +306,7 @@ async def websocket_endpoint(websocket: WebSocket):
     voxel_ct = o_p.nelx * o_p.nely * o_p.nelz
     if voxel_ct > MAX_VOXEL_CT:
         m = "Invalid parameters"
-        logger.warning(f"{client_ip}:{m}")
+        logger.warning(f"{client_ip_hash}:{m}")
         await websocket.send_json({"error": f"{m}"})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -350,10 +355,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 if msg.get("command") == "stop":
                     now = time.time()
                     #only allow 1 stop command every 5 seconds
-                    cmd_history = command_timestamps[client_ip]
+                    cmd_history = command_timestamps[client_ip_hash]
                     if cmd_history and now - cmd_history[-1] < 5:
                         m = "Rate limit exceeded, try again later"
-                        logger.warning(f"{client_ip}: m")
+                        logger.warning(f"{client_ip_hash}: m")
                         await websocket.send_json({"error": m})
                         continue
                     cmd_history.append(now)
@@ -361,7 +366,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({"status": "stopping"})
                     break
                 else:
-                    logger.warning(f"{client_ip}:Invalid Command")
+                    logger.warning(f"{client_ip_hash}:Invalid Command")
         except:
             #client disconnected while waiting
             stop_event.set()
