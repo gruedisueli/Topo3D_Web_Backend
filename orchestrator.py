@@ -252,7 +252,10 @@ if vast_api_key is None:
     logger.error("Error: environment variable for vastAI API key is not set")
     exit(1)
 
-vast = VastAI(api_key=vast_api_key)
+try:
+    vast = VastAI(api_key=vast_api_key)
+except Exception as e:
+    logger.error(f"Error: instantiating VastAI failed: {e}")
 
 connection_attempts = defaultdict(list)#dictionary of hashed IP addresses with a list of timestamps for connection time
 command_timestamps = defaultdict(lambda: deque(maxlen=10)) #only store last 10 timestamps
