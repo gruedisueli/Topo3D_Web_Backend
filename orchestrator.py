@@ -225,23 +225,23 @@ if len(runners) == 0:
         n = i + 1
         url = os.getenv(f'RUNNER_{n}_URL')
         if url is None:
-            print(f'Error: Runner {n} URL env variable not set')
+            logger.error(f'Error: Runner {n} URL env variable not set')
             exit(1)
         id = os.getenv(f'RUNNER_{n}_ID')
         if id is None:
-            print(f'Error: Runner {n} ID env variable not set')
+            logger.error(f'Error: Runner {n} ID env variable not set')
             exit(1)
         runners[url] = Runner(id)
 
 middleman_token = os.getenv('MIDDLEMAN_TOKEN')
 if middleman_token is None:
-    print("Middleman token is not set")
+    logger.error("Middleman token is not set")
     exit(1)
 
 # Define the origins you want to allow (e.g., your frontend URL, or a middleman)
 allowed_origins = [os.getenv('ALLOWED_WEBSOCKET_ORIGIN')]
 if allowed_origins[0] is None:
-    print("Error: could not locate the environment variable for allowed websocket origin")
+    logger.error("Error: could not locate the environment variable for allowed websocket origin")
     allowed_origins.pop(0) 
     #don't exit: allow continuing for local testing
 allowed_origins.append("http://localhost:5173")#for local testing
@@ -249,7 +249,7 @@ allowed_origins.append("http://localhost:5173")#for local testing
 
 vast_api_key = os.getenv('VAST_AI_API_KEY')
 if vast_api_key is None:
-    print("Error: environment variable for vastAI API key is not set")
+    logger.error("Error: environment variable for vastAI API key is not set")
     exit(1)
 
 vast = VastAI(api_key=vast_api_key)
