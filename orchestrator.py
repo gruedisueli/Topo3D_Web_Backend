@@ -233,9 +233,9 @@ if len(runners) == 0:
             exit(1)
         runners[url] = Runner(id)
 
-origin_name = os.getenv('ORIGIN_NAME')
-if origin_name is None:
-    print("Origin name is not set")
+middleman_token = os.getenv('MIDDLEMAN_TOKEN')
+if middleman_token is None:
+    print("Middleman token is not set")
     exit(1)
 
 # Define the origins you want to allow (e.g., your frontend URL, or a middleman)
@@ -503,7 +503,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     
                     #create a new connection to the backend for each optimization
                     try:
-                        backend_websocket = await websockets.connect(backend_url, origin=origin_name)
+                        backend_websocket = await websockets.connect(backend_url, extra_headers={"Authorization": f"Bearer {middleman_token}"})
                         backend_listener = asyncio.create_task(listen_for_backend_msgs())
                         logger.info(f"Connected to backend at {backend_url}")
                     except Exception as e:

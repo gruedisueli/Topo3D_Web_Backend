@@ -25,25 +25,22 @@ import shutil
 import subprocess
 from haship import hash_ip
 
+DEPLOYED = os.path.exists("/.dockerenv") #bool to allow for local testing prior to deployment
 
 # cloudflare tunneling / verify token is in the environment variables wherever you deploy this
-tunnel_token = os.getenv('TUNNEL_TOKEN')
+tunnel_token = os.getenv('TUNNEL_TOKEN') if DEPLOYED else None
+middleman_token = os.getenv('MIDDLEMAN_TOKEN') if DEPLOYED else None
+if DEPLOYED and middleman_token is None:
+    print("ERROR: MIDDLEMAN_TOKEN environment variable not set!")
+    exit(1)
 
-if tunnel_token is None:
+if DEPLOYED and tunnel_token is None:
     print("ERROR: TUNNEL_TOKEN environment variable not set!")
-    # Only exit if running inside a Docker container
-    if os.path.exists("/.dockerenv"):
-        exit(1)
+    exit(1)
 else:
     print(f"Token loaded successfully. Length: {len(tunnel_token)}")
     # The token is already in os.environ, so the child process gets it automatically.
     subprocess.Popen(["cloudflared", "tunnel", "run", "--url", "http://localhost:8000"])
-
-# Define the origins you want to allow (e.g., your frontend URL, or a middleman)
-allowed_origins = [os.getenv('ALLOWED_WEBSOCKET_ORIGIN')]
-if allowed_origins[0] is None:
-    print("Error: could not locate the environment variable for allowed websocket origin")
-allowed_origins.append("http://localhost:5173")#for local testing
 
 connection_attempts = defaultdict(list)#dictionary of hashed IP addresses with a list of timestamps for connection time
 command_timestamps = defaultdict(lambda: deque(maxlen=10)) #only store last 10 timestamps
@@ -87,7 +84,7 @@ async def health():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://gruedisueli.github.io"],  
+    allow_origins=["*"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -248,13 +245,13 @@ async def websocket_endpoint(websocket: WebSocket):
     if not can_connect(client_ip_hash):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
     
-    # --- Secure Origin Check ---
-    origin = websocket.headers.get("origin")
-    if not origin or origin not in allowed_origins:
-        logger.warning(f"Rejected WebSocket connection from unauthorized origin: {origin}")
-        # Close the connection before accepting it
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
+    # --- Secure Token Check ---
+    if (DEPLOYED):
+        auth = websocket.headers.get("authorization", "")
+        if auth != f"Bearer {middleman_token}":
+            logger.warning(f"Rejected unauthorized connection from {websocket.remote_address}")
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
     # --------------------------
     
     await websocket.accept()
