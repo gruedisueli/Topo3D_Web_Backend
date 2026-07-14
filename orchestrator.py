@@ -14,6 +14,7 @@ import json
 from vastai import VastAI
 import httpx
 from haship import hash_ip
+from fastapi.middleware.cors import CORSMiddleware
 
 class Session:
     def __init__(self, start_time=None, end_time=None, job_count = 0):
@@ -245,6 +246,7 @@ if allowed_origins[0] is None:
     #don't exit: allow continuing for local testing
 allowed_origins.append("http://localhost:5173")#for local testing
 
+
 vast_api_key = os.getenv('VAST_AI_API_KEY')
 if vast_api_key is None:
     print("Error: environment variable for vastAI API key is not set")
@@ -256,6 +258,15 @@ connection_attempts = defaultdict(list)#dictionary of hashed IP addresses with a
 command_timestamps = defaultdict(lambda: deque(maxlen=10)) #only store last 10 timestamps
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,  
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 async def run_runner_check_loop():
     """Stops idle instances."""
