@@ -108,7 +108,7 @@ class Runner:
 
     async def start(self, url) -> bool:
         id = self.id
-        start_result = vast.start_instance(id)
+        start_result = vast.start_instance(id=id)
         logger.info(f'Attempted to start {id}, result: {start_result}')
         await asyncio.sleep(self.wait_seconds)
         instance = vast.show_instance(id)
@@ -227,9 +227,14 @@ if len(runners) == 0:
         if url is None:
             logger.error(f'Error: Runner {n} URL env variable not set')
             exit(1)
-        id = os.getenv(f'RUNNER_{n}_ID')
-        if id is None:
+        id_str = os.getenv(f'RUNNER_{n}_ID')
+        if id_str is None:
             logger.error(f'Error: Runner {n} ID env variable not set')
+            exit(1)
+        try:
+            id = int(id_str)
+        except ValueError:
+            logger.error(f'Error: Runner {n} ID must be an integer, got: {id_str}')
             exit(1)
         runners[url] = Runner(id)
 
