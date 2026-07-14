@@ -379,6 +379,7 @@ async def startup_event():
     asyncio.create_task(run_save_loop())
     asyncio.create_task(run_user_purge_loop())
     asyncio.create_task(run_runner_check_loop())
+    logger.info("Application started")
 
 @app.websocket("/ws")
 async def websocket_endpoint(client_websocket: WebSocket):  
