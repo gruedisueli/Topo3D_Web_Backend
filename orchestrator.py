@@ -487,6 +487,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
         backend_websocket = None
         backend_listener = None
         async def listen_for_backend_msgs(): 
+            nonlocal backend_websocket
             try:
                 if backend_websocket is None:
                     logger.error("Backend websocket does not exist")
@@ -527,6 +528,8 @@ async def websocket_endpoint(client_websocket: WebSocket):
                 return
         
         async def close_backend():
+            nonlocal backend_listener
+            nonlocal backend_websocket
             if backend_listener:
                 backend_listener.cancel()
                 backend_listener = None
