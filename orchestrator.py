@@ -508,12 +508,14 @@ async def websocket_endpoint(client_websocket: WebSocket):
                             expecting_stl = data.get("has_stl")
                             if not expecting_stl:
                                 await backend_websocket.close()
+                                backend_websocket = None
                                 return
                     elif isinstance(msg, bytes):
                         if expecting_stl:
                             logger.info("sending final STL to client")
                             await client_websocket.send_bytes(msg)
                             await backend_websocket.close()
+                            backend_websocket = None
                             return
                         logger.info("sending iteration data to client")
                         await client_websocket.send_bytes(msg)
@@ -521,13 +523,16 @@ async def websocket_endpoint(client_websocket: WebSocket):
                 logger.info(f"client or backend disconnected ({e})")
                 #await client_websocket.close()
                 await backend_websocket.close()
+                backend_websocket = None
                 return
         
-        async def cancel_backend():
+        async def close_backend():
             if backend_listener:
                 backend_listener.cancel()
+                backend_listener = None
             if backend_websocket:
                 await backend_websocket.close()
+                backend_websocket = None
             return
 
         stop_msg_sent = False
@@ -540,7 +545,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                         #check session length, cull idle users
                         if time.time() - session_start_time > USER_MAX_SESSION_LENGTH:
                             logger.info(f"session length exceeded for {client_ip_hash}")
-                            await cancel_backend()
+                            await close_backend()
                             return
                         continue #continue listening for messages
                 else:
@@ -548,14 +553,13 @@ async def websocket_endpoint(client_websocket: WebSocket):
                         await asyncio.wait_for(backend_listener, timeout=300)
                     except asyncio.TimeoutError:
                         logger.warning(f"{client_ip_hash}: backend listener timed out after stop")
-                        backend_listener.cancel()
-                    await backend_websocket.close()
+                    await close_backend()
                     continue #keep main websocket open and listening for a new job
                 
                 # #validate and sanitize incoming message
                 if msg.get("command") == "start" and msg.get("data"):
                     logger.info("received start command")
-                    await cancel_backend() #extra check in case backend is still open for some reason from a previous run.
+                    await close_backend() #extra check in case backend is still open for some reason from a previous run.
                     #prevent indefinitely long sessions
                     if time.time() - session_start_time > USER_MAX_SESSION_LENGTH:
                         logger.info(f"session length exceeded for {client_ip_hash}")
@@ -576,7 +580,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     except Exception as e:
                         logger.error(f"Failed to connect to backend: {e}")
                         await client_websocket.send_json({"status": "error"})
-                        await cancel_backend()
+                        await close_backend()
                         return
                     logger.info("sending job to backend")
                     await backend_websocket.send(json.dumps(data))
@@ -604,7 +608,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     logger.warning(f"{client_ip_hash}:Invalid Command")
         except Exception as e:
             logger.info(f"client or backend disconnected ({e})")
-            await cancel_backend()
+            await close_backend()
             return
 
     #start listening for messages
