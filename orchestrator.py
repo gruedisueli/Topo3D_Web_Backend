@@ -490,6 +490,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                 if backend_websocket is None:
                     logger.error("Backend websocket does not exist")
                     return
+                expecting_stl = False
                 while True:
                     msg = await backend_websocket.recv()
                     #detect if frame indicates a string or bytes
@@ -499,21 +500,22 @@ async def websocket_endpoint(client_websocket: WebSocket):
                         except json.JSONDecodeError:
                             logger.error("Got TEXT but not JSON: %s", msg)
                             continue
-                        logger.info("sending iteration data to client")
+                        logger.info("sending metrics data to client")
                         await client_websocket.send_json(data)
                         s = data.get("status")
                         if s == "complete":
-                            has_stl = data.get("has_stl")
-                            if not has_stl:
+                            expecting_stl = data.get("has_stl")
+                            if not expecting_stl:
                                 await backend_websocket.close()
                                 return
                     elif isinstance(msg, bytes):
-                        continue
-                        #byte arrays only come at the end of optimization (results STL)
-                        logger.info("sending final STL to client")
+                        if expecting_stl:
+                            logger.info("sending final STL to client")
+                            await client_websocket.send_bytes(msg)
+                            await backend_websocket.close()
+                            return
+                        logger.info("sending iteration data to client")
                         await client_websocket.send_bytes(msg)
-                        await backend_websocket.close()
-                        return
             except Exception as e:
                 logger.info(f"client or backend disconnected ({e})")
                 #await client_websocket.close()
