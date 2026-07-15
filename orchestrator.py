@@ -509,6 +509,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                                 return
                     elif isinstance(msg, bytes):
                         #byte arrays only come at the end of optimization (results STL)
+                        logger.info("sending final STL to client")
                         await client_websocket.send_bytes(msg)
                         await backend_websocket.close()
                         return
