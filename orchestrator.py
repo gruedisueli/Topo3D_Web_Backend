@@ -204,6 +204,7 @@ RUNNER_CHECK_INTERVAL_SECONDS = 60
 SAVE_INTERVAL_SECONDS = 900 #15 minutes
 USER_PURGE_INTERVAL_SECONDS = 24 * 3600 #24 hours
 USER_MAX_USAGE_SECONDS_PER_PERIOD = 24 * 3600
+USER_MAX_SESSION_LENGTH = 3 * 3600
 os.makedirs(DATA_DIR, exist_ok=True)
 users_path = os.path.join(DATA_DIR, USER_LOG)
 runners_path = os.path.join(DATA_DIR, RUNNER_LOG)
@@ -473,6 +474,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
     
     session_id = str(uuid.uuid4())
     user.start_session(session_id, backend_url)
+    session_start_time = time.time()
 
     async def listen_for_client_msgs():
         backend_websocket = None
@@ -508,12 +510,27 @@ async def websocket_endpoint(client_websocket: WebSocket):
                 #await client_websocket.close()
                 await backend_websocket.close()
                 return
+        
+        async def cancel_backend():
+            if backend_listener:
+                backend_listener.cancel()
+            if backend_websocket:
+                await backend_websocket.close()
+            return
 
         stop_msg_sent = False
         try:
             while True:
                 if not backend_listener or (not backend_listener.done() and not stop_msg_sent):
-                    msg = await client_websocket.receive_json()
+                    try:
+                        msg = asyncio.wait_for(await client_websocket.receive_json(), timeout=300) #timeout for periodic user status checks
+                    except asyncio.TimeoutError:
+                        #check session length, cull idle users
+                        if time.time() - session_start_time > USER_MAX_SESSION_LENGTH:
+                            logger.info(f"session length exceeded for {client_ip_hash}")
+                            await cancel_backend()
+                            return
+                        continue #continue listening for messages
                 else:
                     try:
                         await asyncio.wait_for(backend_listener, timeout=300)
@@ -521,10 +538,16 @@ async def websocket_endpoint(client_websocket: WebSocket):
                         logger.warning(f"{client_ip_hash}: backend listener timed out after stop")
                         backend_listener.cancel()
                     await backend_websocket.close()
-                    return
+                    continue #keep main websocket open and listening for a new job
                 
                 # #validate and sanitize incoming message
                 if msg.get("command") == "start" and msg.get("data"):
+                    await cancel_backend() #extra check in case backend is still open for some reason from a previous run.
+                    #prevent indefinitely long sessions
+                    if time.time() - session_start_time > USER_MAX_SESSION_LENGTH:
+                        logger.info(f"session length exceeded for {client_ip_hash}")
+                        return
+                    
                     data = msg.get("data")
                     try:
                         o_p = OptimizationParams(**data) #strict type enforcing
@@ -540,10 +563,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     except Exception as e:
                         logger.error(f"Failed to connect to backend: {e}")
                         await client_websocket.send_json({"status": "error"})
-                        if backend_websocket:
-                            await backend_websocket.close()
-                        if backend_listener:
-                            backend_listener.cancel()
+                        await cancel_backend()
                         return
 
                     await backend_websocket.send(json.dumps(data))
@@ -570,10 +590,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     logger.warning(f"{client_ip_hash}:Invalid Command")
         except Exception as e:
             logger.info(f"client or backend disconnected ({e})")
-            if backend_listener:
-                backend_listener.cancel()
-            if backend_websocket:
-                await backend_websocket.close()
+            await cancel_backend()
             return
 
     #start listening for messages
