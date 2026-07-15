@@ -450,21 +450,22 @@ async def websocket_endpoint(client_websocket: WebSocket):
     backend_url = ''
     if len(user.current_sessions) == 0:
         found = False
-        for url, r in runners.items():
-            if r.is_running and r.current_user_count > 0:
-                continue
-            elif r.is_running and r.current_user_count == 0:
-                logger.info("Found existing started instance with no active users")
-                backend_url = url
-                found = True
-                r.add_user()
-                break
-            if not await r.start(url):
-                continue
-            backend_url = url
-            r.add_user()
+        idle_url = next((url for url in runners.keys() if runners[url].is_idle), None)
+        if idle_url is not None:
+            logger.info("Found existing started instance with no active users")
+            backend_url = idle_url
             found = True
-            break
+            runners[idle_url].add_user()
+        else:
+            for url, r in runners.items():
+                if r.is_running:
+                    continue
+                if not await r.start(url):
+                    continue
+                backend_url = url
+                r.add_user()
+                found = True
+                break
         if not found:
             if not any(runners[k].is_running for k in list(runners.keys())):
                 logger.warning('no instances are startable')
