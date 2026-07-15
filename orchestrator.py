@@ -480,6 +480,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
     
     session_id = str(uuid.uuid4())
     user.start_session(session_id, backend_url)
+    logger.info(f"started session {session_id}")
     session_start_time = time.time()
 
     async def listen_for_client_msgs():
@@ -613,6 +614,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
     rnr = runners[backend_url]
     rnr.remove_user() #keep instance hot for some time after they leave (allow instant reconnecting if they accidentally closed window, eg)
     user.finish_session(session_id)
+    logger.info(f"ended session {session_id}")
 
     await client_websocket.close()
 
