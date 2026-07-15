@@ -549,7 +549,6 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     await backend_websocket.send(json.dumps(data))
                     runners[backend_url].add_job()
                     user.add_job(session_id)
-                    started = True
                 elif msg.get("command") == "stop":
                     now = time.time()
                     #only allow 1 stop command every 5 seconds
