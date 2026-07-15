@@ -510,7 +510,6 @@ async def websocket_endpoint(client_websocket: WebSocket):
                 return
 
         stop_msg_sent = False
-        started = False
         try:
             while True:
                 if not backend_listener or (not backend_listener.done() and not stop_msg_sent):
@@ -525,7 +524,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     return
                 
                 # #validate and sanitize incoming message
-                if not started and msg.get("command") == "start" and msg.get("data"):
+                if msg.get("command") == "start" and msg.get("data"):
                     data = msg.get("data")
                     try:
                         o_p = OptimizationParams(**data) #strict type enforcing
