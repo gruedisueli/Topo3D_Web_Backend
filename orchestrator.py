@@ -112,7 +112,7 @@ class Runner:
         logger.info(f'Attempted to start {id}, result: {start_result}')
         if not start_result.get("success"):
             logger.info("Host busy. Stopping instance...")
-            vast.stop_instance(id)
+            vast.stop_instance(id=id)
             return False
         # await asyncio.sleep(self.wait_seconds)
         # instance = vast.show_instance(id)
@@ -131,7 +131,7 @@ class Runner:
             await asyncio.sleep(self.wait_seconds)
         if not started:
             logger.error(f'failed to start instance {id}')
-            vast.stop_instance(id)
+            vast.stop_instance(id=id)
             return False
         logger.info(f'Successfully started instance {id}')
 
@@ -146,7 +146,7 @@ class Runner:
     def stop(self):
         self.is_running = False
         self.up_time += time.time() - self.start_time
-        vast.stop_instance(self.id)
+        vast.stop_instance(id=self.id)
     
     def add_user(self):
         self.current_user_count += 1
