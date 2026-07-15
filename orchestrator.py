@@ -590,6 +590,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     runners[backend_url].add_job()
                     user.add_job(session_id)
                 elif msg.get("command") == "stop":
+                    logger.info("stop message received")
                     now = time.time()
                     #only allow 1 stop command every 5 seconds
                     cmd_history = command_timestamps[client_ip_hash]
