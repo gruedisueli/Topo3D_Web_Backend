@@ -593,9 +593,9 @@ async def websocket_endpoint(client_websocket: WebSocket):
                 elif msg.get("command") == "stop":
                     logger.info("stop message received")
                     now = time.time()
-                    #only allow 1 stop command every 5 seconds
+                    #only allow 1 stop command every second
                     cmd_history = command_timestamps[client_ip_hash]
-                    if cmd_history and now - cmd_history[-1] < 5:
+                    if cmd_history and now - cmd_history[-1] < 1:
                         m = "Rate limit exceeded, try again later"
                         logger.warning(f"{client_ip_hash}: {m}")
                         await client_websocket.send_json({"error": m})
