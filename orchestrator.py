@@ -146,6 +146,7 @@ class Runner:
         
     def stop(self):
         self.is_running = False
+        self.is_idle = False
         self.up_time += time.time() - self.start_time
         vast.stop_instance(id=self.id)
     
