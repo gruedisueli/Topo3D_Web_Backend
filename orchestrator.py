@@ -137,6 +137,7 @@ class Runner:
 
         self.is_running = True
         self.start_time = time.time()
+        return True
 
     def mark_started_and_idle(self):
         self.is_running = True
