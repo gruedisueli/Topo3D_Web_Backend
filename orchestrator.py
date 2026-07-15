@@ -529,7 +529,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
             while True:
                 if not backend_listener or (not backend_listener.done() and not stop_msg_sent):
                     try:
-                        msg = asyncio.wait_for(await client_websocket.receive_json(), timeout=300) #timeout for periodic user status checks
+                        msg = await asyncio.wait_for(await client_websocket.receive_json(), timeout=300) #timeout for periodic user status checks
                     except asyncio.TimeoutError:
                         #check session length, cull idle users
                         if time.time() - session_start_time > USER_MAX_SESSION_LENGTH:
