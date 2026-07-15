@@ -557,6 +557,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     except asyncio.TimeoutError:
                         logger.warning(f"{client_ip_hash}: backend listener timed out after stop")
                     await close_backend()
+                    stop_msg_sent = False
                     continue #keep main websocket open and listening for a new job
                 
                 # #validate and sanitize incoming message
