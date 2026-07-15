@@ -499,6 +499,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                         except json.JSONDecodeError:
                             logger.error("Got TEXT but not JSON: %s", msg)
                             continue
+                        logger.info("sending iteration data to client")
                         await client_websocket.send_json(data)
                         s = data.get("status")
                         if s == "complete":
