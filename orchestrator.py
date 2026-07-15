@@ -110,14 +110,18 @@ class Runner:
         id = self.id
         start_result = vast.start_instance(id=id)
         logger.info(f'Attempted to start {id}, result: {start_result}')
-        await asyncio.sleep(self.wait_seconds)
-        instance = vast.show_instance(id)
-        instance_status = instance.get("status")
-        logger.info(f"Instance status: {instance_status}")
-        if instance_status in ("scheduled", "pending"):
+        if not start_result.get("success"):
             logger.info("Host busy. Stopping instance...")
             vast.stop_instance(id)
             return False
+        # await asyncio.sleep(self.wait_seconds)
+        # instance = vast.show_instance(id)
+        # instance_status = instance.get("status")
+        # logger.info(f"Instance status: {instance_status}")
+        # if instance_status in ("scheduled", "pending"):
+        #     logger.info("Host busy. Stopping instance...")
+        #     vast.stop_instance(id)
+        #     return False
         boot_time = time.time()
         started = False
         while time.time() - boot_time < self.timeout_seconds:
