@@ -548,6 +548,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                 
                 # #validate and sanitize incoming message
                 if msg.get("command") == "start" and msg.get("data"):
+                    logger.info("received start command")
                     await cancel_backend() #extra check in case backend is still open for some reason from a previous run.
                     #prevent indefinitely long sessions
                     if time.time() - session_start_time > USER_MAX_SESSION_LENGTH:
@@ -571,7 +572,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                         await client_websocket.send_json({"status": "error"})
                         await cancel_backend()
                         return
-
+                    logger.info("sending job to backend")
                     await backend_websocket.send(json.dumps(data))
                     runners[backend_url].add_job()
                     user.add_job(session_id)
@@ -588,6 +589,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     if backend_websocket is None:
                         logger.warning(f"{client_ip_hash}: stop command received before any backend connection")
                         continue
+                    logger.info("sending stop message to backend")
                     await backend_websocket.send(json.dumps(msg))
                     stop_msg_sent = True
                     #keep the frontend listener active because it contains the backend listener...
