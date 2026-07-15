@@ -142,6 +142,7 @@ class Runner:
         self.is_running = True
         self.is_idle = True
         self.idle_start_time = time.time()
+        self.start_time = self.idle_start_time
         
     def stop(self):
         self.is_running = False
