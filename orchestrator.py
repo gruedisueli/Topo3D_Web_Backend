@@ -311,7 +311,7 @@ def stop_idle_runners():
     for id, runner in runners.items():
         if not runner.is_running or not runner.is_idle:
             continue
-        if runner.idle_time < RUNNER_MAX_IDLE_SECONDS:
+        if runner.idle_time() < RUNNER_MAX_IDLE_SECONDS:
             continue
         logger.info(f"Shutting down idle instance: {id}")
         runner.stop()
