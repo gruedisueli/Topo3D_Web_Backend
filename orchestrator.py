@@ -398,7 +398,7 @@ async def get_runners_data():
         out_dict[f"runner_{i}"] = {
             "is_running": runner.is_running,
             "is_idle": runner.is_idle,
-            "idle_time": runner.idle_time,
+            "idle_time": runner.idle_time(),
             "cumulative_job_count": job_ct,
             "up_time": up_time,
             "current_user_count": runner.current_user_count
