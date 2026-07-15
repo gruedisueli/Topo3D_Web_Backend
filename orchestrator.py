@@ -137,6 +137,11 @@ class Runner:
 
         self.is_running = True
         self.start_time = time.time()
+
+    def mark_started_and_idle(self):
+        self.is_running = True
+        self.is_idle = True
+        self.idle_start_time = time.time()
         
     def stop(self):
         self.is_running = False
@@ -265,6 +270,20 @@ try:
     vast = VastAI(api_key=vast_api_key)
 except Exception as e:
     logger.error(f"Error: instantiating VastAI failed: {e}")
+
+#update statuses of runners (some may already be running if service restarted)
+all_instances = vast.show_instances()
+for instance in all_instances:
+    id = instance.get("id")
+    runner = next((r for r in runners.values() if r.id == id), None)
+    if runner is None:
+        continue
+    instance_status = instance.get("actual_status")
+    instance_current_state = instance.get("cur_state")
+
+    logger.info(f"Instance {id} status: {instance_status}, state: {instance_current_state}")
+    if instance_status != "stopped" and instance_current_state != "stopped":
+        runner.mark_started_and_idle()
 
 connection_attempts = defaultdict(list)#dictionary of hashed IP addresses with a list of timestamps for connection time
 command_timestamps = defaultdict(lambda: deque(maxlen=10)) #only store last 10 timestamps
