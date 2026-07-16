@@ -281,7 +281,6 @@ for instance in all_instances:
         #ignore instances with other images on them
         continue
     id = instance.get("id")
-    logger.info(f"ID is type: {type(id)}")
     if id is None:
         logger.error("Could not get instance ID")
         continue
@@ -433,7 +432,7 @@ async def get_runners_data():
 
 @app.post("/set-runner-url", status_code=status.HTTP_202_ACCEPTED)
 def set_runner_url(id: str, url: str, token: str = Depends(verify_token)):
-    clean_id = ''.join(char for char in id if char.isdigit())
+    clean_id = int(''.join(char for char in id if char.isdigit()))
     #strip non-numerals from ID eg "C.123456" becomes 123456
     runner = runners.get(clean_id)
     if runner is None:
