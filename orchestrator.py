@@ -431,12 +431,14 @@ async def get_runners_data():
 
 @app.post("/set-runner-url", status_code=status.HTTP_202_ACCEPTED)
 def set_runner_url(id: str, url: str, token: str = Depends(verify_token)):
-    runner = runners.get(id)
+    clean_id = ''.join(char for char in id if char.isdigit())
+    #strip non-numerals from ID eg "C.123456" becomes 123456
+    runner = runners.get(clean_id)
     if runner is None:
         runner = Runner()
-        runners[id] = runner
+        runners[clean_id] = runner
     runner.set_url(url)
-    logger.info(f"Set URL={url} on runner {id}")
+    logger.info(f"Set URL={url} on runner {clean_id}")
         
 @app.on_event("startup")
 async def startup_event():
