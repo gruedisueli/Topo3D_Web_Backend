@@ -433,8 +433,8 @@ async def get_runners_data():
 def set_runner_url(id: str, url: str, token: str = Depends(verify_token)):
     runner = runners.get(id)
     if runner is None:
-        logger.error(f"Runner {id} attempted to set its URL on the middleman but is not in list of known runners")
-        return
+        runner = Runner()
+        runners[id] = runner
     runner.set_url(url)
     logger.info(f"Set URL={url} on runner {id}")
         
