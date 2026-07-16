@@ -421,8 +421,10 @@ async def startup_event():
 @app.websocket("/ws")
 async def websocket_endpoint(client_websocket: WebSocket):  
     #check connection attempts for this IP address
+    logger.info("received connection request")
     client_ip_hash = hash_ip(client_websocket.client.host)
     if not can_connect(client_ip_hash):
+        logger.warning(f"Rejected connection from {client_ip_hash}")
         await client_websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     
