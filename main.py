@@ -7,7 +7,6 @@ from run_opt import run_optimization_api
 
 from fastapi import FastAPI, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
-import requests
 import threading
 import queue
 import numpy as np
@@ -29,20 +28,6 @@ DEPLOYED = os.path.exists("/.dockerenv") #bool to allow for local testing prior 
 # cloudflare tunneling / verify token is in the environment variables wherever you deploy this
 tunnel_token = os.getenv('TUNNEL_TOKEN') if DEPLOYED else None
 middleman_token = os.getenv('MIDDLEMAN_TOKEN') if DEPLOYED else None
-middleman_url = os.getenv('MIDDLEMAN_URL') if DEPLOYED else None
-runner_url = os.getenv("RUNNER_URL") if DEPLOYED else None
-vast_ai_id = os.getenv('VAST_CONTAINERLABEL') if DEPLOYED else None
-if DEPLOYED and middleman_token is None:
-    print("ERROR: MIDDLEMAN_TOKEN environment variable not set!")
-    exit(1)
-
-if DEPLOYED and middleman_url is None:
-    print("ERROR: MIDDLEMAN_URL environment variable not set!")
-    exit(1)
-
-if DEPLOYED and runner_url is None:
-    print("ERROR: RUNNER_URL environment variable not set!")
-    exit(1)
 
 if DEPLOYED and tunnel_token is None:
     print("ERROR: TUNNEL_TOKEN environment variable not set!")
@@ -51,10 +36,6 @@ else:
     print(f"Token loaded successfully. Length: {len(tunnel_token)}")
     # The token is already in os.environ, so the child process gets it automatically.
     subprocess.Popen(["cloudflared", "tunnel", "run", "--url", "http://localhost:8000"])
-
-if DEPLOYED and vast_ai_id is None:
-    print("ERROR: VAST_CONTAINERLABEL environment variable not set!")
-    exit(1)
 
 JSON_DIR = "json_files"
 RESULTS_DIR = "results"
@@ -230,25 +211,6 @@ async def optimization_worker():
 
 @app.on_event("startup")
 async def startup_event():
-    # post URL to middleman
-    if DEPLOYED:
-        url = f"https://{middleman_url}/set-runner-url"
-        payload = {
-            "id": vast_ai_id,
-            "url": runner_url
-        }
-        headers = {
-            "Authorization": f"Bearer {middleman_token}"
-        }
-        try:
-            response = requests.post(url, params=payload, headers=headers)
-            response.raise_for_status()
-            logger.info("Successfully posted URL to middleman")
-        except requests.exceptions.HTTPError as err:
-            print(f"request failed: {err}")
-            if response and response.text:
-                print("Server error details:", response.json())
-
     # Ensure upload directory exists
     # Run cleanup once immediately
     cleanup_old_files()

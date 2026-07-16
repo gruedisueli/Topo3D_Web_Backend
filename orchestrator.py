@@ -98,27 +98,14 @@ class Runner:
     wait_seconds = 3
     timeout_seconds = 300
 
-    def __init__(self, cumulative_job_count = 0, up_time = 0):
-        self.url = None
+    def __init__(self, url, cumulative_job_count = 0, up_time = 0):
+        self.url = url
         self.is_running = False
         self.cumulative_job_count = cumulative_job_count
         self.up_time = up_time
         self.current_user_count = 0
         self.is_idle = False
         self.idle_start_time = 0
-
-    def set_url(self, url):
-        if self.url == url:
-            return
-        if self.url is not None:
-            logger.error(f"Cannot change the URL of a runner once it exists. Attempted to change {self.url} to {url}")
-            return
-        self.url = url
-        logger.info(f"Set URL on runner to {self.url} after receiving url {url}")
-
-    async def url_wait_loop(self):
-        while self.url is None:
-            await asyncio.sleep(1)
 
     async def start(self, id) -> bool:
         start_result = vast.start_instance(id=id)
@@ -129,14 +116,6 @@ class Runner:
             return False
         boot_time = time.time()
         started = False
-
-        #wait for URL to be set by backend (via POST on middleman)
-        try:
-            await asyncio.wait_for(self.url_wait_loop(), timeout=self.timeout_seconds)
-        except:
-            logger.error(f"Instance {id} failed to register its URL to middleman")
-            vast.stop_instance(id=id)
-            return False
 
         #final health check on backend
         while time.time() - boot_time < self.timeout_seconds:
@@ -187,13 +166,14 @@ class Runner:
 
     def to_dict(self):
         return {
+            "url": self.url,
             "cumulative_job_count": self.cumulative_job_count,
             "up_time": self.up_time
         }
     
     @classmethod
     def from_dict(cls, data):
-        return cls(data["cumulative_job_count"], data["up_time"])
+        return cls(data["url"], data["cumulative_job_count"], data["up_time"])
 
 DATA_DIR = "log_files"
 USER_LOG = "users.json"
@@ -284,16 +264,21 @@ for instance in all_instances:
     if id is None:
         logger.error("Could not get instance ID")
         continue
+    template_name = instance.get('template_name')
+    if template_name is None:
+        logger.error("Could not get template name")
+        continue
+    url = f"{template_name.lower()}.gruedi.com"
     runner = runners.get(id)
     if runner is None:
-        runner = Runner()
+        runner = Runner(url)
         runners[id] = runner
 
     instance_status = instance.get("actual_status")
     instance_current_state = instance.get("cur_state")
 
     logger.info(f"Instance {id} status: {instance_status}, state: {instance_current_state}")
-    if instance_status != "stopped" and instance_current_state != "stopped":
+    if instance_status == "running" or instance_current_state == "running":
         runner.mark_started_and_idle()
 
 connection_attempts = defaultdict(list)#dictionary of hashed IP addresses with a list of timestamps for connection time
@@ -429,17 +414,6 @@ async def get_runners_data():
     out_dict["total_up_time"] = total_up_time
     pretty_string = json.dumps(out_dict, indent=4)
     return JSONResponse(content=json.loads(pretty_string))
-
-@app.post("/set-runner-url", status_code=status.HTTP_202_ACCEPTED)
-def set_runner_url(id: str, url: str, token: str = Depends(verify_token)):
-    clean_id = int(''.join(char for char in id if char.isdigit()))
-    #strip non-numerals from ID eg "C.123456" becomes 123456
-    runner = runners.get(clean_id)
-    if runner is None:
-        runner = Runner()
-        runners[clean_id] = runner
-    runner.set_url(url)
-    logger.info(f"Set URL={url} on runner {clean_id}")
         
 @app.on_event("startup")
 async def startup_event():
