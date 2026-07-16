@@ -69,7 +69,7 @@ class User:
 
     def total_usage_time(self):
         now = time.time()
-        return sum([session.end_time - session.start_time for session in self.past_sessions]) + sum([now - session.start_time for session in self.current_sessions]) 
+        return sum([session.end_time - session.start_time for session in self.past_sessions]) + sum([now - session.start_time for session in self.current_sessions.values()]) 
     
 
     def purge_old_sessions(self):
