@@ -485,6 +485,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
         backend_url = user.current_runner_url
     await client_websocket.send_json({"status": "connected"})
     
+    logger.info("Backend started or already running")
     session_id = str(uuid.uuid4())
     user.start_session(session_id, backend_url)
     logger.info(f"started session {session_id}")
