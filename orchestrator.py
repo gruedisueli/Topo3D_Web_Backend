@@ -445,6 +445,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
         users[client_ip_hash] = User()
         logger.info(f"added new user {client_ip_hash}")
     user = users[client_ip_hash]
+    logger.info(f"user {client_ip_hash} is registered")
 
     if user.total_usage_time() > USER_MAX_USAGE_SECONDS_PER_PERIOD:
         logger.info(f"user {client_ip_hash} exceeded allowed usage time")
