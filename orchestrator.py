@@ -281,6 +281,7 @@ for instance in all_instances:
         #ignore instances with other images on them
         continue
     id = instance.get("id")
+    logger.info(f"ID is type: {type(id)}")
     if id is None:
         logger.error("Could not get instance ID")
         continue
