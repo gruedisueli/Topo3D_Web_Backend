@@ -437,19 +437,22 @@ async def websocket_endpoint(client_websocket: WebSocket):
         return
     # --------------------------
     
+    logger.info("accepting connection")
     await client_websocket.accept()
 
     if not users.get(client_ip_hash):
         users[client_ip_hash] = User()
+        logger.info(f"added new user {client_ip_hash}")
     user = users[client_ip_hash]
 
     if user.total_usage_time() > USER_MAX_USAGE_SECONDS_PER_PERIOD:
-        logger.info("user exceeded allowed usage time")
+        logger.info(f"user {client_ip_hash} exceeded allowed usage time")
         await client_websocket.send_json({"status": "exceeded_limit"})
         await client_websocket.close()
         return
 
     backend_url = ''
+    logger.info(f"allocating gpu resources for user {client_ip_hash}")
     if len(user.current_sessions) == 0:
         found = False
         idle_url = next((url for url in runners.keys() if runners[url].is_idle), None)
@@ -477,6 +480,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
             backend_url = min((k for k, v in runners.items() if v.is_running), key=lambda k: runners[k].current_user_count)
             runners[backend_url].add_user()
     else:
+        logger.info(f"user {client_ip_hash} has existing session, using same gpu")
         backend_url = user.current_runner_url
     await client_websocket.send_json({"status": "connected"})
     
