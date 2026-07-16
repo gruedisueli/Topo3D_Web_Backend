@@ -114,6 +114,7 @@ class Runner:
             logger.error(f"Cannot change the URL of a runner once it exists. Attempted to change {self.url} to {url}")
             return
         self.url = url
+        logger.info(f"Set URL on runner to {self.url} after receiving url {url}")
 
     async def url_wait_loop(self):
         while self.url is None:
