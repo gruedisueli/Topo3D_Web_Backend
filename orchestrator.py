@@ -159,11 +159,11 @@ class Runner:
         self.idle_start_time = time.time()
         self.start_time = self.idle_start_time
         
-    def stop(self):
+    def stop(self, id):
         self.is_running = False
         self.is_idle = False
         self.up_time += time.time() - self.start_time
-        vast.stop_instance(id=self.id)
+        vast.stop_instance(id=id)
     
     def add_user(self):
         self.current_user_count += 1
@@ -324,7 +324,7 @@ def stop_idle_runners():
         if runner.idle_time() < RUNNER_MAX_IDLE_SECONDS:
             continue
         logger.info(f"Shutting down idle instance: {id}")
-        runner.stop()
+        runner.stop(id)
 
 async def run_user_purge_loop():
     """Purges old user data periodically."""
