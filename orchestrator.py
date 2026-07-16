@@ -437,8 +437,9 @@ async def websocket_endpoint(client_websocket: WebSocket):
         return
     # --------------------------
     
-    logger.info("accepting connection")
+    logger.info(f"accepting connection with {client_ip_hash}")
     await client_websocket.accept()
+    logger.info(f"connection to {client_ip_hash} established")
 
     if not users.get(client_ip_hash):
         users[client_ip_hash] = User()
