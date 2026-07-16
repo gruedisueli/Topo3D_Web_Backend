@@ -7,12 +7,12 @@ from run_opt import run_optimization_api
 
 from fastapi import FastAPI, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
+import requests
 import threading
 import queue
 import numpy as np
 import asyncio
 import uuid
-from collections import defaultdict, deque
 import time
 from pathlib import Path
 import logging
@@ -23,15 +23,25 @@ from typing import List
 import json
 import shutil
 import subprocess
-from haship import hash_ip
 
 DEPLOYED = os.path.exists("/.dockerenv") #bool to allow for local testing prior to deployment
 
 # cloudflare tunneling / verify token is in the environment variables wherever you deploy this
 tunnel_token = os.getenv('TUNNEL_TOKEN') if DEPLOYED else None
 middleman_token = os.getenv('MIDDLEMAN_TOKEN') if DEPLOYED else None
+middleman_url = os.getenv('MIDDLEMAN_URL') if DEPLOYED else None
+runner_url = os.getenv("RUNNER_URL") if DEPLOYED else None
+vast_ai_id = os.getenv('VAST_CONTAINERLABEL') if DEPLOYED else None
 if DEPLOYED and middleman_token is None:
     print("ERROR: MIDDLEMAN_TOKEN environment variable not set!")
+    exit(1)
+
+if DEPLOYED and middleman_url is None:
+    print("ERROR: MIDDLEMAN_URL environment variable not set!")
+    exit(1)
+
+if DEPLOYED and runner_url is None:
+    print("ERROR: RUNNER_URL environment variable not set!")
     exit(1)
 
 if DEPLOYED and tunnel_token is None:
@@ -42,8 +52,9 @@ else:
     # The token is already in os.environ, so the child process gets it automatically.
     subprocess.Popen(["cloudflared", "tunnel", "run", "--url", "http://localhost:8000"])
 
-connection_attempts = defaultdict(list)#dictionary of hashed IP addresses with a list of timestamps for connection time
-command_timestamps = defaultdict(lambda: deque(maxlen=10)) #only store last 10 timestamps
+if DEPLOYED and vast_ai_id is None:
+    print("ERROR: VAST_CONTAINERLABEL environment variable not set!")
+    exit(1)
 
 JSON_DIR = "json_files"
 RESULTS_DIR = "results"
@@ -91,7 +102,6 @@ app.add_middleware(
 )
 
 def cleanup_old_files():
-    #cleanup_files(UPLOAD_DIR, "stl")
     cleanup_files(JSON_DIR, "json")
     cleanup_results()
 
@@ -136,16 +146,6 @@ def run_cleanup_loop():
         time.sleep(CLEANUP_INTERVAL_SECONDS)
         cleanup_old_files()
 
-def can_connect(ip: str, max_attempts: int = 5, window_seconds: int= 60) -> bool:
-    now = time.time()
-    #keep only those attempts within sliding window
-    attempts = [t for t in connection_attempts[ip] if now - t < window_seconds]
-    if len(attempts) > max_attempts:
-        return False
-    attempts.append(now)
-    connection_attempts[ip] = attempts
-    return True
-
 #global state
 waiting_queue = asyncio.Queue()
 
@@ -183,6 +183,7 @@ async def optimization_worker():
             while True:
                 if time.time() - start_time > MAX_JOB_LENGTH_SECONDS:
                     #gently force the optimization to complete
+                    logger.info("job exceeded max time, stopping")
                     stop_event.set()
                     await websocket.send_json({"status": "stopping"})
                 try:
@@ -229,6 +230,25 @@ async def optimization_worker():
 
 @app.on_event("startup")
 async def startup_event():
+    # post URL to middleman
+    if DEPLOYED:
+        url = f"https://{middleman_url}/set-runner-url"
+        payload = {
+            "id": vast_ai_id,
+            "url": runner_url
+        }
+        headers = {
+            "Authorization": f"Bearer {middleman_token}"
+        }
+        try:
+            response = requests.post(url, params=payload, headers=headers)
+            response.raise_for_status()
+            logger.info("Successfully posted URL to middleman")
+        except requests.exceptions.HTTPError as err:
+            print(f"request failed: {err}")
+            if response and response.text:
+                print("Server error details:", response.json())
+
     # Ensure upload directory exists
     # Run cleanup once immediately
     cleanup_old_files()
@@ -240,11 +260,6 @@ async def startup_event():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):  
-    #check connection attempts for this IP address
-    client_ip_hash = hash_ip(websocket.client.host)
-    if not can_connect(client_ip_hash):
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-    
     # --- Secure Token Check ---
     if (DEPLOYED):
         auth = websocket.headers.get("authorization", "")
@@ -268,20 +283,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.close()
         except:
             pass
-    
-    #validate and sanitize incoming message
-    if len(raw_msg) > 1024:#reject large messages
-        m = "message too large"
-        logger.warning(f"{client_ip_hash}:{m}")
-        await websocket.send_json({"error": {m}})
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
 
     try:
         o_p = OptimizationParams(**raw_msg) #strict type enforcing
     except ValidationError as e:
         m = "Invalid parameters"
-        logger.warning(f"{client_ip_hash}:{m}")
+        logger.warning(f"{m}")
         await websocket.send_json({"error": f"{m}"})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -303,7 +310,7 @@ async def websocket_endpoint(websocket: WebSocket):
     voxel_ct = o_p.nelx * o_p.nely * o_p.nelz
     if voxel_ct > MAX_VOXEL_CT:
         m = "Invalid parameters"
-        logger.warning(f"{client_ip_hash}:{m}")
+        logger.warning(f"{m}")
         await websocket.send_json({"error": f"{m}"})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -350,20 +357,11 @@ async def websocket_endpoint(websocket: WebSocket):
             while True:
                 msg = await websocket.receive_json()
                 if msg.get("command") == "stop":
-                    now = time.time()
-                    #only allow 1 stop command every 5 seconds
-                    cmd_history = command_timestamps[client_ip_hash]
-                    if cmd_history and now - cmd_history[-1] < 5:
-                        m = "Rate limit exceeded, try again later"
-                        logger.warning(f"{client_ip_hash}: m")
-                        await websocket.send_json({"error": m})
-                        continue
-                    cmd_history.append(now)
                     stop_event.set()
                     await websocket.send_json({"status": "stopping"})
                     break
                 else:
-                    logger.warning(f"{client_ip_hash}:Invalid Command")
+                    logger.warning("Invalid Command")
         except:
             #client disconnected while waiting
             stop_event.set()

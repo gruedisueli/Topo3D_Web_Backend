@@ -1,6 +1,7 @@
 import os
-from fastapi import FastAPI, WebSocket, status
+from fastapi import FastAPI, Depends, HTTPException, WebSocket, status
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import websockets
 import asyncio
 import uuid
@@ -43,11 +44,11 @@ class User:
     def __init__(self, past_sessions = None):
         self.past_sessions = past_sessions if past_sessions is not None else []
         self.current_sessions = {}
-        self.current_runner_url = None  # there can only be one runner per user to keep resources allocated fairly
+        self.current_runner_id = None  # there can only be one runner per user to keep resources allocated fairly
 
-    def start_session(self, session_id, runner_url):
-        if self.current_runner_url is None:
-            self.current_runner_url = runner_url
+    def start_session(self, session_id, runner_id):
+        if self.current_runner_id is None:
+            self.current_runner_id = runner_id
         self.current_sessions[session_id] = Session()
 
     def finish_session(self, session_id):
@@ -58,7 +59,7 @@ class User:
         session.end_session()
         self.past_sessions.append(session)
         if len(self.current_sessions) == 0:
-            self.current_runner_url = None
+            self.current_runner_id = None
 
     def add_job(self, session_id):
         session = self.current_sessions.get(session_id)
@@ -97,8 +98,8 @@ class Runner:
     wait_seconds = 3
     timeout_seconds = 300
 
-    def __init__(self, id, cumulative_job_count = 0, up_time = 0):
-        self.id = id
+    def __init__(self, cumulative_job_count = 0, up_time = 0):
+        self.url = None
         self.is_running = False
         self.cumulative_job_count = cumulative_job_count
         self.up_time = up_time
@@ -106,26 +107,39 @@ class Runner:
         self.is_idle = False
         self.idle_start_time = 0
 
-    async def start(self, url) -> bool:
-        id = self.id
+    def set_url(self, url):
+        if self.url == url:
+            return
+        if self.url is not None:
+            logger.error(f"Cannot change the URL of a runner once it exists. Attempted to change {self.url} to {url}")
+            return
+        self.url = url
+
+    async def url_wait_loop(self):
+        while self.url is None:
+            await asyncio.sleep(1)
+
+    async def start(self, id) -> bool:
         start_result = vast.start_instance(id=id)
         logger.info(f'Attempted to start {id}, result: {start_result}')
         if not start_result.get("success"):
             logger.info("Host busy. Stopping instance...")
             vast.stop_instance(id=id)
             return False
-        # await asyncio.sleep(self.wait_seconds)
-        # instance = vast.show_instance(id)
-        # instance_status = instance.get("status")
-        # logger.info(f"Instance status: {instance_status}")
-        # if instance_status in ("scheduled", "pending"):
-        #     logger.info("Host busy. Stopping instance...")
-        #     vast.stop_instance(id)
-        #     return False
         boot_time = time.time()
         started = False
+
+        #wait for URL to be set by backend (via POST on middleman)
+        try:
+            await asyncio.wait_for(self.url_wait_loop(), timeout=self.timeout_seconds)
+        except:
+            logger.error(f"Instance {id} failed to register its URL to middleman")
+            vast.stop_instance(id=id)
+            return False
+
+        #final health check on backend
         while time.time() - boot_time < self.timeout_seconds:
-            if await isBackendReady(url):
+            if await isBackendReady(self.url):
                 started = True
                 break
             await asyncio.sleep(self.wait_seconds)
@@ -172,20 +186,31 @@ class Runner:
 
     def to_dict(self):
         return {
-            "id": self.id,
             "cumulative_job_count": self.cumulative_job_count,
             "up_time": self.up_time
         }
     
     @classmethod
     def from_dict(cls, data):
-        return cls(data["id"], data["cumulative_job_count"], data["up_time"])
+        return cls(data["cumulative_job_count"], data["up_time"])
+
+DATA_DIR = "log_files"
+USER_LOG = "users.json"
+RUNNER_LOG = "runners.json"
+RUNNERS_COUNT = 5
+RUNNER_MAX_IDLE_SECONDS = 900
+RUNNER_CHECK_INTERVAL_SECONDS = 60
+SAVE_INTERVAL_SECONDS = 900 #15 minutes
+USER_PURGE_INTERVAL_SECONDS = 24 * 3600 #24 hours
+USER_MAX_USAGE_SECONDS_PER_PERIOD = 24 * 3600
+USER_MAX_SESSION_LENGTH = 3 * 3600
+IMAGE_UUID = 'gruedi/topo3d_web_backend_with_lightsail:latest'
 
 #configure logging
 log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 
 #create file handler that rotates logs when they reach 50mb
-file_handler = RotatingFileHandler('backend.log', maxBytes=50 * 1024 * 1024, backupCount=2)
+file_handler = RotatingFileHandler(f'{DATA_DIR}/backend.log', maxBytes=50 * 1024 * 1024, backupCount=2)
 file_handler.setFormatter(logging.Formatter(log_format))
 
 #get logger and add file handler
@@ -198,16 +223,6 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(logging.Formatter(log_format))
 logger.addHandler(console_handler)
 
-DATA_DIR = "log_files"
-USER_LOG = "users.json"
-RUNNER_LOG = "runners.json"
-RUNNERS_COUNT = 5
-RUNNER_MAX_IDLE_SECONDS = 900
-RUNNER_CHECK_INTERVAL_SECONDS = 60
-SAVE_INTERVAL_SECONDS = 900 #15 minutes
-USER_PURGE_INTERVAL_SECONDS = 24 * 3600 #24 hours
-USER_MAX_USAGE_SECONDS_PER_PERIOD = 24 * 3600
-USER_MAX_SESSION_LENGTH = 3 * 3600
 os.makedirs(DATA_DIR, exist_ok=True)
 users_path = os.path.join(DATA_DIR, USER_LOG)
 runners_path = os.path.join(DATA_DIR, RUNNER_LOG)
@@ -233,30 +248,12 @@ if os.path.exists(runners_path):
     except Exception as e:
         logger.error(f"Failed to load runners file: {e}")
 
-if len(runners) == 0:
-    for i in range(RUNNERS_COUNT):
-        n = i + 1
-        url = os.getenv(f'RUNNER_{n}_URL')
-        if url is None:
-            logger.error(f'Error: Runner {n} URL env variable not set')
-            exit(1)
-        id_str = os.getenv(f'RUNNER_{n}_ID')
-        if id_str is None:
-            logger.error(f'Error: Runner {n} ID env variable not set')
-            exit(1)
-        try:
-            id = int(id_str)
-        except ValueError:
-            logger.error(f'Error: Runner {n} ID must be an integer, got: {id_str}')
-            exit(1)
-        runners[url] = Runner(id)
-
 middleman_token = os.getenv('MIDDLEMAN_TOKEN')
 if middleman_token is None:
     logger.error("Middleman token is not set")
     exit(1)
 
-# Define the origins you want to allow (e.g., your frontend URL, or a middleman)
+# Define the origins you want to allow from frontend
 allowed_origins = [os.getenv('ALLOWED_WEBSOCKET_ORIGIN')]
 if allowed_origins[0] is None:
     logger.error("Error: could not locate the environment variable for allowed websocket origin")
@@ -275,13 +272,22 @@ try:
 except Exception as e:
     logger.error(f"Error: instantiating VastAI failed: {e}")
 
-#update statuses of runners (some may already be running if service restarted)
+#update statuses of runners / instantiate them if they don't already exist in records
 all_instances = vast.show_instances()
 for instance in all_instances:
-    id = instance.get("id")
-    runner = next((r for r in runners.values() if r.id == id), None)
-    if runner is None:
+    image = instance.get("image_uuid")
+    if not image == IMAGE_UUID:
+        #ignore instances with other images on them
         continue
+    id = instance.get("id")
+    if id is None:
+        logger.error("Could not get instance ID")
+        continue
+    runner = runners.get(id)
+    if runner is None:
+        runner = Runner()
+        runners[id] = runner
+
     instance_status = instance.get("actual_status")
     instance_current_state = instance.get("cur_state")
 
@@ -301,6 +307,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+security = HTTPBearer()
 
 
 async def run_runner_check_loop():
@@ -383,6 +391,16 @@ async def isBackendReady(backend_url) -> bool:
                 return False
         except httpx.RequestError:
             return False
+        
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    if token != middleman_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return token
 
 @app.get("/")
 async def root():
@@ -393,12 +411,12 @@ async def get_runners_data():
     out_dict = {}
     total_jobs = 0
     total_up_time = 0
-    for i, runner in enumerate(runners.values()):
+    for id, runner in runners.items():
         job_ct = runner.cumulative_job_count
         up_time = runner.up_time
         total_jobs += job_ct
         total_up_time += up_time
-        out_dict[f"runner_{i}"] = {
+        out_dict[f"runner_{id}"] = {
             "is_running": runner.is_running,
             "is_idle": runner.is_idle,
             "idle_time": runner.idle_time(),
@@ -410,6 +428,15 @@ async def get_runners_data():
     out_dict["total_up_time"] = total_up_time
     pretty_string = json.dumps(out_dict, indent=4)
     return JSONResponse(content=json.loads(pretty_string))
+
+@app.post("/set-runner-url", status_code=status.HTTP_202_ACCEPTED)
+def set_runner_url(id: str, url: str, token: str = Depends(verify_token)):
+    runner = runners.get(id)
+    if runner is None:
+        logger.error(f"Runner {id} attempted to set its URL on the middleman but is not in list of known runners")
+        return
+    runner.set_url(url)
+    logger.info(f"Set URL={url} on runner {id}")
         
 @app.on_event("startup")
 async def startup_event():
@@ -453,24 +480,24 @@ async def websocket_endpoint(client_websocket: WebSocket):
         await client_websocket.close()
         return
 
-    backend_url = ''
+    backend_id = ''
     logger.info(f"allocating gpu resources for user {client_ip_hash}")
     logger.info(f"user {client_ip_hash} has {len(user.current_sessions)} current sessions")
     if len(user.current_sessions) == 0:
         found = False
-        idle_url = next((url for url in runners.keys() if runners[url].is_idle), None)
-        if idle_url is not None:
+        idle_id = next((id for id in runners.keys() if runners[id].is_idle), None)
+        if idle_id is not None:
             logger.info("Found existing started instance with no active users")
-            backend_url = idle_url
+            backend_id = idle_id
             found = True
-            runners[idle_url].add_user()
+            runners[idle_id].add_user()
         else:
-            for url, r in runners.items():
+            for id, r in runners.items():
                 if r.is_running:
                     continue
-                if not await r.start(url):
+                if not await r.start(id):
                     continue
-                backend_url = url
+                backend_id = id
                 r.add_user()
                 found = True
                 break
@@ -480,16 +507,16 @@ async def websocket_endpoint(client_websocket: WebSocket):
                 await client_websocket.send_json({"status": "busy"})
                 await client_websocket.close()
                 return
-            backend_url = min((k for k, v in runners.items() if v.is_running), key=lambda k: runners[k].current_user_count)
-            runners[backend_url].add_user()
+            backend_id = min((k for k, v in runners.items() if v.is_running), key=lambda k: runners[k].current_user_count)
+            runners[backend_id].add_user()
     else:
         logger.info(f"user {client_ip_hash} has existing session, using same gpu")
-        backend_url = user.current_runner_url
+        backend_id = user.current_runner_id
     await client_websocket.send_json({"status": "connected"})
     
     logger.info("Backend started or already running")
     session_id = str(uuid.uuid4())
-    user.start_session(session_id, backend_url)
+    user.start_session(session_id, backend_id)
     logger.info(f"started session {session_id}")
     session_start_time = time.time()
 
@@ -588,6 +615,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     
                     #create a new connection to the backend for each optimization
                     try:
+                        backend_url = runners[backend_id].url
                         backend_websocket = await websockets.connect(f"wss://{backend_url}/ws", additional_headers={"Authorization": f"Bearer {middleman_token}"})
                         backend_listener = asyncio.create_task(listen_for_backend_msgs())
                         logger.info(f"Connected to backend at {backend_url}")
@@ -598,7 +626,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                         return
                     logger.info("sending job to backend")
                     await backend_websocket.send(json.dumps(data))
-                    runners[backend_url].add_job()
+                    runners[backend_id].add_job()
                     user.add_job(session_id)
                 elif msg.get("command") == "stop":
                     logger.info("stop message received")
@@ -630,7 +658,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
     await listen_for_client_msgs()
 
     #clean up
-    rnr = runners[backend_url]
+    rnr = runners[backend_id]
     rnr.remove_user() #keep instance hot for some time after they leave (allow instant reconnecting if they accidentally closed window, eg)
     user.finish_session(session_id)
     logger.info(f"ended session {session_id}")
