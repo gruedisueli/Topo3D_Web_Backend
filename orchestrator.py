@@ -634,28 +634,18 @@ async def websocket_endpoint(client_websocket: WebSocket):
             return
 
     #start listening for messages
-    cleaned=False
     try:
         await listen_for_client_msgs()
     except Exception as e:
         logger.error(f"Received exception when listening for client messages: {e}")
-    finally:
-        #clean up
-        logger.log(f"number of users before removing user: {runners[backend_id].current_user_count}")
-        rnr = runners[backend_id]
-        rnr.remove_user() #keep instance hot for some time after they leave (allow instant reconnecting if they accidentally closed window, eg)
-        user.finish_session(session_id)
-        logger.info(f"ended session {session_id}")
-        logger.log(f"number of users after removing user: {runners[backend_id].current_user_count}")
-        cleaned=True
 
-    if not cleaned:
-        logger.log(f"number of users before removing user: {runners[backend_id].current_user_count}")
-        rnr = runners[backend_id]
-        rnr.remove_user() #keep instance hot for some time after they leave (allow instant reconnecting if they accidentally closed window, eg)
-        user.finish_session(session_id)
-        logger.info(f"ended session {session_id}")
-        logger.log(f"number of users after removing user: {runners[backend_id].current_user_count}")
+    #clean up
+    logger.info(f"number of users before removing user: {runners[backend_id].current_user_count}")
+    rnr = runners[backend_id]
+    rnr.remove_user() #keep instance hot for some time after they leave (allow instant reconnecting if they accidentally closed window, eg)
+    user.finish_session(session_id)
+    logger.info(f"ended session {session_id}")
+    logger.info(f"number of users after removing user: {runners[backend_id].current_user_count}")
 
     await client_websocket.close()
 
