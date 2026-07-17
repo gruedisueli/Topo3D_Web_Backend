@@ -634,7 +634,10 @@ async def websocket_endpoint(client_websocket: WebSocket):
             return
 
     #start listening for messages
-    await listen_for_client_msgs()
+    try:
+        await listen_for_client_msgs()
+    except Exception as e:
+        logger.error(f"Received exception when listening for client messages: {e}")
 
     #clean up
     logger.log(f"number of users before removing user: {runners[backend_id].current_user_count}")
