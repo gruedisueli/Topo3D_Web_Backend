@@ -2,7 +2,9 @@
 
 This is the code that runs the backend server for the Topo3D project.
 
-Below you can see the system architecture. This backend repository is the "uvicorn server" portion that runs on the GPU backend. You can find the optimizer code on the dev branch of my [fork of the PyTopo3D repository](https://github.com/gruedisueli/PyTopo3D_Backend/tree/dev).
+Below you can see the system architecture. This backend repository consists of two parts:
+   1) the "uvicorn server" portion that runs on the GPU backend. You can find the optimizer code on the dev branch of my [fork of the PyTopo3D repository](https://github.com/gruedisueli/PyTopo3D_Backend/tree/dev).
+   2) the "orchestrator" middleman that runs on a VPS, and manages spinning up/down GPUs and assigning them to users.
 
 ![architecture_diagram](architecture.png)
 
