@@ -477,7 +477,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                 backend_id = id
                 r.add_user()
                 found = True
-                logger.info(f"Started instance {id}, active user ct = {r.current_user_count}")
+                logger.info(f"Started instance {id}, active user ct = {r.current_user_count}, {runners[id].current_user_count}")
                 break
         if not found:
             if not any(runners[k].is_running for k in list(runners.keys())):
