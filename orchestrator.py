@@ -225,7 +225,7 @@ if os.path.exists(runners_path):
         with open(runners_path, 'r', encoding='utf-8') as file:
             data = json.load(file)
             for key, inner_obj in data.items():
-                runners[key] = Runner.from_dict(inner_obj)
+                runners[int(key)] = Runner.from_dict(inner_obj)
     except Exception as e:
         logger.error(f"Failed to load runners file: {e}")
 
