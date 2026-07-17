@@ -637,10 +637,12 @@ async def websocket_endpoint(client_websocket: WebSocket):
     await listen_for_client_msgs()
 
     #clean up
+    logger.log(f"number of users before removing user: {runners[backend_id].current_user_count}")
     rnr = runners[backend_id]
     rnr.remove_user() #keep instance hot for some time after they leave (allow instant reconnecting if they accidentally closed window, eg)
     user.finish_session(session_id)
     logger.info(f"ended session {session_id}")
+    logger.log(f"number of users after removing user: {runners[backend_id].current_user_count}")
 
     await client_websocket.close()
 
