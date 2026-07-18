@@ -607,7 +607,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     try:
                         backend_url = runners[backend_id].url
                         logger.info(f"Attempting to connect to runner at {backend_url}, id = {backend_id}")
-                        backend_websocket = await websockets.connect(f"wss://{backend_url}/ws", additional_headers={"Authorization": f"Bearer {middleman_token}"}, max_size=MAX_MSG_SIZE)
+                        backend_websocket = await websockets.connect(f"wss://{backend_url}/ws", additional_headers={"Authorization": f"Bearer {middleman_token}"}, max_size=MAX_MSG_SIZE, ping_interval=None)
                         backend_listener = asyncio.create_task(listen_for_backend_msgs())
                         logger.info(f"Connected to backend at {backend_url}")
                     except Exception as e:
