@@ -185,7 +185,7 @@ SAVE_INTERVAL_SECONDS = 900 #15 minutes
 USER_PURGE_INTERVAL_SECONDS = 24 * 3600 #24 hours
 USER_MAX_USAGE_SECONDS_PER_PERIOD = 24 * 3600
 USER_MAX_SESSION_LENGTH = 3 * 3600 #regardless of activity, disconnect if session is longer than this
-USER_MAX_IDLE_TIME = 900 #disconnect from backend if nothing has happend in this time (eg no opt running and tab is idle)
+SESSION_MAX_IDLE_TIME = 900 #disconnect from backend if nothing has happend in this time (eg no opt running and tab is idle)
 IMAGE_UUID = 'gruedi/topo3d_web_backend_with_lightsail:latest'
 
 #configure logging
