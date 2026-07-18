@@ -491,6 +491,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
     else:
         logger.info(f"user {client_ip_hash} has existing session, using same gpu")
         backend_id = user.current_runner_id
+        runners[backend_id].add_user() #each session is counted as a "user" even if it is the same user
     await client_websocket.send_json({"status": "connected"})
     
     logger.info("Backend started or already running")
@@ -561,7 +562,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
         try:
             while True:
                 now = time.time()
-                if now - last_msg_time > USER_MAX_IDLE_TIME:
+                if now - last_msg_time > SESSION_MAX_IDLE_TIME:
                     logger.info(f"Ending session for user {client_ip_hash}: max idle time exceeded")
                     await close_backend()
                     return
