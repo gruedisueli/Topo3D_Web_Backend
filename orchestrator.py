@@ -187,6 +187,7 @@ USER_MAX_USAGE_SECONDS_PER_PERIOD = 24 * 3600
 USER_MAX_SESSION_LENGTH = 3 * 3600 #regardless of activity, disconnect if session is longer than this
 SESSION_MAX_IDLE_TIME = 900 #disconnect from backend if nothing has happend in this time (eg no opt running and tab is idle)
 IMAGE_UUID = 'gruedi/topo3d_web_backend_with_lightsail:latest'
+MAX_MSG_SIZE = 100 * 1024 * 1024
 
 #configure logging
 log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -606,7 +607,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     try:
                         backend_url = runners[backend_id].url
                         logger.info(f"Attempting to connect to runner at {backend_url}, id = {backend_id}")
-                        backend_websocket = await websockets.connect(f"wss://{backend_url}/ws", additional_headers={"Authorization": f"Bearer {middleman_token}"})
+                        backend_websocket = await websockets.connect(f"wss://{backend_url}/ws", additional_headers={"Authorization": f"Bearer {middleman_token}"}, max_size=MAX_MSG_SIZE)
                         backend_listener = asyncio.create_task(listen_for_backend_msgs())
                         logger.info(f"Connected to backend at {backend_url}")
                     except Exception as e:
