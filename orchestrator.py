@@ -179,12 +179,13 @@ DATA_DIR = "log_files"
 USER_LOG = "users.json"
 RUNNER_LOG = "runners.json"
 RUNNERS_COUNT = 5
-RUNNER_MAX_IDLE_SECONDS = 900
+RUNNER_MAX_IDLE_SECONDS = 300
 RUNNER_CHECK_INTERVAL_SECONDS = 60
 SAVE_INTERVAL_SECONDS = 900 #15 minutes
 USER_PURGE_INTERVAL_SECONDS = 24 * 3600 #24 hours
 USER_MAX_USAGE_SECONDS_PER_PERIOD = 24 * 3600
-USER_MAX_SESSION_LENGTH = 3 * 3600
+USER_MAX_SESSION_LENGTH = 3 * 3600 #regardless of activity, disconnect if session is longer than this
+USER_MAX_IDLE_TIME = 900 #disconnect from backend if nothing has happend in this time (eg no opt running and tab is idle)
 IMAGE_UUID = 'gruedi/topo3d_web_backend_with_lightsail:latest'
 
 #configure logging
@@ -501,8 +502,10 @@ async def websocket_endpoint(client_websocket: WebSocket):
     async def listen_for_client_msgs():
         backend_websocket = None
         backend_listener = None
+        last_msg_time = time.time()
         async def listen_for_backend_msgs(): 
             nonlocal backend_websocket
+            nonlocal last_msg_time
             try:
                 if backend_websocket is None:
                     logger.error("Backend websocket does not exist")
@@ -510,6 +513,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                 expecting_stl = False
                 while True:
                     msg = await backend_websocket.recv()
+                    last_msg_time = time.time()
                     #detect if frame indicates a string or bytes
                     if isinstance(msg, str):
                         try:
@@ -556,15 +560,20 @@ async def websocket_endpoint(client_websocket: WebSocket):
         stop_msg_sent = False
         try:
             while True:
+                now = time.time()
+                if now - last_msg_time > USER_MAX_IDLE_TIME:
+                    logger.info(f"Ending session for user {client_ip_hash}: max idle time exceeded")
+                    await close_backend()
+                    return
+                if now - session_start_time > USER_MAX_SESSION_LENGTH:
+                    logger.info(f"session length exceeded for {client_ip_hash}")
+                    await close_backend()
+                    return
+                
                 if not backend_listener or (not backend_listener.done() and not stop_msg_sent):
                     try:
                         msg = await asyncio.wait_for(client_websocket.receive_json(), timeout=300) #timeout for periodic user status checks
                     except asyncio.TimeoutError:
-                        #check session length, cull idle users
-                        if time.time() - session_start_time > USER_MAX_SESSION_LENGTH:
-                            logger.info(f"session length exceeded for {client_ip_hash}")
-                            await close_backend()
-                            return
                         continue #continue listening for messages
                 else:
                     try:
@@ -575,6 +584,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     stop_msg_sent = False
                     continue #keep main websocket open and listening for a new job
                 
+                last_msg_time = time.time()
                 # #validate and sanitize incoming message
                 if msg.get("command") == "start" and msg.get("data"):
                     logger.info("received start command")
