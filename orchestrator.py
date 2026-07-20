@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, Depends, HTTPException, WebSocket, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import websockets
@@ -514,23 +514,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                     return
                 expecting_stl = False
                 while True:
-                    try:
-                        msg = await asyncio.wait_for(backend_websocket.recv(), timeout=120)
-                    except asyncio.TimeoutError:
-                        logger.warning("No message from backend in 120s, checking health...")
-                        #send a ping to check if backend is still alive
-                        try:
-                            pong_waiter = await backend_websocket.ping()
-                            await asyncio.wait_for(pong_waiter, timeout=15)
-                            logger.info("Backend is still alive (pong received)")
-                            continue
-                        except:
-                            logger.error("Backend ping failed, assuming connection lost")
-                            return
-                    except websockets.exceptions.ConnectionClosed as e:
-                        logger.info(f"Backend connection closed while receiving: {e}")
-                        return
-                    
+                    msg = await backend_websocket.recv()
                     last_msg_time = time.time()
                     #detect if frame indicates a string or bytes
                     if isinstance(msg, str):
@@ -540,11 +524,7 @@ async def websocket_endpoint(client_websocket: WebSocket):
                             logger.error("Got TEXT but not JSON: %s", msg)
                             continue
                         logger.info("sending metrics data to client")
-                        try:
-                            await client_websocket.send_json(data)
-                        except WebSocketDisconnect:
-                            logger.info("Client disconnected while sending metrics")
-                            return
+                        await client_websocket.send_json(data)
                         s = data.get("status")
                         if s == "complete":
                             expecting_stl = data.get("has_stl")
@@ -553,50 +533,29 @@ async def websocket_endpoint(client_websocket: WebSocket):
                                 backend_websocket = None
                                 return
                     elif isinstance(msg, bytes):
-                        try:
-                            if expecting_stl:
-                                logger.info("sending final STL to client")
-                                await client_websocket.send_bytes(msg)
-                                await backend_websocket.close()
-                                backend_websocket = None
-                                return
-                            logger.info("sending iteration data to client")
+                        if expecting_stl:
+                            logger.info("sending final STL to client")
                             await client_websocket.send_bytes(msg)
-                        except WebSocketDisconnect:
-                            logger.info("Client disconnected while sending binary data")
+                            await backend_websocket.close()
+                            backend_websocket = None
                             return
-            except websockets.exceptions.ConnectionClosed as e:
-                logger.info(f"Backend connection closed: {e}")
-                return
-            except WebSocketDisconnect:
-                logger.info("Client disconnected while receiving from backend")
-                return
+                        logger.info("sending iteration data to client")
+                        await client_websocket.send_bytes(msg)
             except Exception as e:
-                logger.error(f"Unexpected error in backend listener: {e}")
+                logger.info(f"client or backend disconnected ({e})")
+                #await client_websocket.close()
+                await backend_websocket.close()
+                backend_websocket = None
                 return
-            finally:
-                if backend_websocket:
-                    try:
-                        await backend_websocket.close()
-                    except Exception:
-                        pass
-                    backend_websocket = None
         
         async def close_backend():
             nonlocal backend_listener
             nonlocal backend_websocket
-            if backend_listener and not backend_listener.done():
+            if backend_listener:
                 backend_listener.cancel()
-                try:
-                    await backend_listener
-                except (asyncio.CancelledError, Exception):
-                    pass
                 backend_listener = None
             if backend_websocket:
-                try:
-                    await backend_websocket.close()
-                except Exception:
-                    pass
+                await backend_websocket.close()
                 backend_websocket = None
             return
 
@@ -618,9 +577,6 @@ async def websocket_endpoint(client_websocket: WebSocket):
                         msg = await asyncio.wait_for(client_websocket.receive_json(), timeout=300) #timeout for periodic user status checks
                     except asyncio.TimeoutError:
                         continue #continue listening for messages
-                    except WebSocketDisconnect:
-                        logger.info(f"Client {client_ip_hash} disconnected while waiting for command")
-                        return
                 else:
                     try:
                         await asyncio.wait_for(backend_listener, timeout=300)
@@ -647,23 +603,16 @@ async def websocket_endpoint(client_websocket: WebSocket):
                         logger.warning(f"{client_ip_hash}:Invalid parameters")
                         return
                     
-                                        #create a new connection to the backend for each optimization
+                    #create a new connection to the backend for each optimization
                     try:
                         backend_url = runners[backend_id].url
                         logger.info(f"Attempting to connect to runner at {backend_url}, id = {backend_id}")
-                        backend_websocket = await websockets.connect(
-                            f"wss://{backend_url}/ws", 
-                            additional_headers={"Authorization": f"Bearer {middleman_token}"}, 
-                            max_size=MAX_MSG_SIZE, 
-                            ping_interval=20,      # send a ping every 20 seconds
-                            ping_timeout=20,       # wait 20s for pong before disconnecting
-                            close_timeout=10       # wait 10s for close handshake
-                        )
+                        backend_websocket = await websockets.connect(f"wss://{backend_url}/ws", additional_headers={"Authorization": f"Bearer {middleman_token}"}, max_size=MAX_MSG_SIZE, ping_interval=None)
                         backend_listener = asyncio.create_task(listen_for_backend_msgs())
                         logger.info(f"Connected to backend at {backend_url}")
-                    except (websockets.exceptions.WebSocketException, OSError, asyncio.TimeoutError) as e:
+                    except Exception as e:
                         logger.error(f"Failed to connect to backend: {e}")
-                        await client_websocket.send_json({"status": "error", "message": "Backend connection failed"})
+                        await client_websocket.send_json({"status": "error"})
                         await close_backend()
                         return
                     logger.info("sending job to backend")
@@ -699,19 +648,16 @@ async def websocket_endpoint(client_websocket: WebSocket):
     #start listening for messages
     try:
         await listen_for_client_msgs()
-    except WebSocketDisconnect:
-        logger.info(f"Client {client_ip_hash} disconnected (WebSocketDisconnect)")
     except Exception as e:
-        logger.error(f"Fatal WebSocket error for {client_ip_hash}: {e}")
-    finally:
-        #ensure cleanup always happens
-        rnr = runners.get(backend_id)
-        if rnr:
-            rnr.remove_user()
-        user.finish_session(session_id)
-        logger.info(f"ended session {session_id}")
-        try:
-            await client_websocket.close()
-        except Exception:
-            pass
+        logger.error(f"Received exception when listening for client messages: {e}")
+
+    #clean up
+    logger.info(f"number of users before removing user: {runners[backend_id].current_user_count}")
+    rnr = runners[backend_id]
+    rnr.remove_user() #keep instance hot for some time after they leave (allow instant reconnecting if they accidentally closed window, eg)
+    user.finish_session(session_id)
+    logger.info(f"ended session {session_id}")
+    logger.info(f"number of users after removing user: {runners[backend_id].current_user_count}")
+
+    await client_websocket.close()
 
